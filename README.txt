@@ -10,7 +10,7 @@ Once you have completed the steps below you should be ready to run the package. 
 
 The example below is for 2.7.9 and assumes that c:\temp is the location of all files downloaded. 
 
-1) download the following Microsoft installer (msi) file:  https://www.python.org/ftp/python/2.7.1/python-2.7.9.msi 
+1) download the following Microsoft installer (msi) file:  https://www.python.org/ftp/python/2.7.9/python-2.7.9.msi 
 Execute the .msi file and follow instructions to install Python to a location of your choice. Ensure that Python is added to the system path (this is the bottom option on the first page of the installer after the point where the user is requested to set the location for python to be installed)
 
 2) From http://www.lfd.uci.edu/~gohlke/pythonlibs/ download the following 3 binary (.whl) files, which correspond to Python version 2.7 on a 32-bit Windows machine to any (temporary) folder eg c:\temp\ 
@@ -33,7 +33,7 @@ Installation finished - the downloaded files in C:\temp may now be deleted
 
 Alternatively, if the computer onto which you are installing the packages is behind a firewall / unable to connect to the internet the following procedure should be followed:
 
-i) On a computer with internet connection, download the following Microsoft installer (msi) file:  https://www.python.org/ftp/python/2.7.1/python-2.7.9.msi and copy it to a directory of your choosing on the computer where you are installing isobarQuant. eg c:\temp
+i) On a computer with internet connection, download the following Microsoft installer (msi) file:  https://www.python.org/ftp/python/2.7.9/python-2.7.9.msi and copy it to a directory of your choosing on the computer where you are installing isobarQuant. eg c:\temp
 
 ii) On a computer with internet connection, download the following 3 binary (.whl) files, from http://www.lfd.uci.edu/~gohlke/pythonlibs/:
 numpy-1.8.2+mkl-cp27-none-win32.whl 
