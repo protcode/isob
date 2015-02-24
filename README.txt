@@ -21,9 +21,9 @@ tables-3.1.1-cp27-none-win32.whl
 
 and install them via the command prompt in the order given below:
 
- C:\pip install c:\temp\numpy-1.8.2+mkl-cp27-none-win32.whl 
- C:\pip install c:\temp\numexpr-2.4-cp27-none-win32.whl 
- C:\pip install c:\temp\tables-3.1.1-cp27-none-win32.whl
+ C:\>pip install c:\temp\numpy-1.8.2+mkl-cp27-none-win32.whl 
+ C:\>pip install c:\temp\numexpr-2.4-cp27-none-win32.whl 
+ C:\>pip install c:\temp\tables-3.1.1-cp27-none-win32.whl
 
 3) From a command prompt run: C:\pip install pathlib
 

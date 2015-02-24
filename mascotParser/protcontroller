@@ -1,0 +1,37 @@
+from mascotHDF5 import hdf5
+from protein import proteinSet
+from pathlib import Path
+
+
+dir = path('./data/data/')
+files = dir.files('*.hdf5')
+
+for file in files:
+    hd = hdf5(file, [])
+    hd.readOpen()
+
+    seq2acc = hd.readSeq2AccAll()
+    acc2seq = {}
+
+    for seq in seq2acc:
+        s2a = seq2acc[seq]
+
+        data = s2a.copy()
+        del data['accs']
+
+        for acc in s2a['accs']:
+            if acc in acc2seq:
+                acc2seq[acc].addPeptide(seq, data)
+            else:
+                acc2seq[acc] = proteinSet(acc, seq, data)
+
+
+
+    x = acc2seqSet['IPI00795725.1'].issubset(acc2seqSet['CZH00010984.2'])
+    y = acc2seqSet['CZH00010984.2'].issubset(acc2seqSet['IPI00795725.1'])
+    pass
+
+
+    hd.readClose()
+
+print 'Finished'
