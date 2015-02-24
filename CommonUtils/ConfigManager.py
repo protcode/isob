@@ -10,7 +10,7 @@ instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
 
-This file mainly deaqls with the handling of the command line data and reading
+This file mainly deals with the handling of the command line data and reading
 configuration files converting parameter values as directed.
 
 isobarQuant is distributed in the hope that it will be useful,
