@@ -361,7 +361,7 @@ class Datamanager():
             width = widths['HCD']
         else:
             width = min(widths.values())
-        width = 0.20
+
         if width in isolation:
             values = isolation[width]
             s2iParam['winfull'] = values[0]
