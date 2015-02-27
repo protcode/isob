@@ -401,7 +401,7 @@ class DATimporter:
                                          delta_seq=delta_seq, is_unique=is_unique,
                                          isotopelabel_id=int(q['isolabel_id']), score=score,
                                          quant_raw=q['area'], quant_isocorrected=q['corrected'],
-                                         quant_allcorrected=0, p2t=p2t,
+                                         quant_allcorrected=q['corrected'], p2t=p2t,
                                          peptide_length=peptide_length, s2i=s2i,
                                          in_quantification_of_protein=0, fdr_at_score=fdr_at_score)
 
