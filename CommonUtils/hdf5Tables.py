@@ -943,7 +943,7 @@ class ResultPeptide(tables.IsDescription):
     peptide = tables.StringCol(100, pos=3)
     variable_modstring = tables.StringCol(100, pos=4)
     fixed_modstring = tables.StringCol(100, pos=5)
-    positional_modstring = tables.StringCol(150, pos=6)
+    positional_modstring = tables.StringCol(350, pos=6)
     score = tables.Float32Col(pos=7)
     rank = tables.Int32Col(pos=8)
     mw = tables.Float32Col(pos=9)
