@@ -279,6 +279,10 @@ if __name__ == '__main__':
 
     i = 0
     for job in files:
+        if job.srcpth.suffix.lower() != '.raw':
+            mssafe.logs.log.log(mssafe.logs.PROCESS, 'Not RAW file, skipping: %s' % job.srcpth.name)
+            continue
+
         i += 1
         if len(files) > 1:
             mssafe.logs.log.info('jobid = %s (%i/%i)' % (str(job.job_id), i, len(files)))

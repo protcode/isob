@@ -15,17 +15,17 @@ The example below is for 2.7.9 and assumes that c:\temp is the location of all f
 1) Download the following Microsoft installer (msi) file:  https://www.python.org/ftp/python/2.7.9/python-2.7.9.msi
 Execute the .msi file and follow instructions to install Python to a location of your choice. Ensure that the location of the Python interpreter (python.exe, probably located in c:\Python27\) is added to the system path (this is performed during installation by selecting the bottom option on the first page of the installer after the point where the user is requested to set the location for python to be installed, by default it is set as a red 'X')
 
-2) From http://www.lfd.uci.edu/~gohlke/pythonlibs/ download the following 3 binary (.whl) files, which correspond to Python version 2.7 on a 32-bit Windows machine to any (temporary) folder eg c:\temp\
+2) Within this download there are 3 binary (.whl) files taken from the external repository maintained by Christoph Gohlke (http://www.lfd.uci.edu/~gohlke/pythonlibs/), which correspond to Python version 2.7 on a 32-bit Windows machine
 
 numpy-1.8.2+mkl-cp27-none-win32.whl
 numexpr-2.4-cp27-none-win32.whl
 tables-3.1.1-cp27-none-win32.whl
 
-and install them via the command prompt in the order given below:
+These should be installed via the command prompt in the order given below:
 
- C:\>pip install c:\temp\numpy-1.8.2+mkl-cp27-none-win32.whl
- C:\>pip install c:\temp\numexpr-2.4-cp27-none-win32.whl
- C:\>pip install c:\temp\tables-3.1.1-cp27-none-win32.whl
+ C:\>pip install c:\isob-1.0.0\numpy-1.8.2+mkl-cp27-none-win32.whl
+ C:\>pip install c:\isob-1.0.0\numexpr-2.4-cp27-none-win32.whl
+ C:\>pip install c:\isob-1.0.0\tables-3.1.1-cp27-none-win32.whl
 
 3) From a command prompt run: C:\>pip install pathlib
 
@@ -37,22 +37,16 @@ Alternatively, if the computer onto which you are installing the packages is beh
 
 i) On a computer with internet connection, download the following Microsoft installer (msi) file:  https://www.python.org/ftp/python/2.7.9/python-2.7.9.msi and copy it to a directory of your choosing on the computer where you are installing isobarQuant. eg c:\temp
 
-ii) On a computer with internet connection, download the following 3 binary (.whl) files, from http://www.lfd.uci.edu/~gohlke/pythonlibs/:
-numpy-1.8.2+mkl-cp27-none-win32.whl
-numexpr-2.4-cp27-none-win32.whl
-tables-3.1.1-cp27-none-win32.whl
-and also copy them to directory of your choosing on the computer where you are performing the installation eg c:\temp
-
 ii) On a computer with internet connection, download pathlib from:
 https://pypi.python.org/packages/source/p/pathlib/pathlib-1.0.1.tar.gz
 and copy to a directory of your choosing on the computer where the installation is being done eg c:\temp
 
 iii)Execute the .msi file and follow instructions to install Python to a location of your choice. Ensure that Python is added to the system path (this is the bottom option on the first page of the installer after the point where the user is requested to set the location for python to be installed)
 
-iv) On the computer where the installation is being carried out, open a command prompt and run
-  iv.1) C:\>pip install c:\temp\numpy-1.8.2+mkl-cp27-none-win32.whl
-  iv.2) C:\>pip install c:\temp\numexpr-2.4-cp27-none-win32.whl
-  iv.3) C:\>pip install c:\temp\tables-3.1.1-cp27-none-win32.whl
+iv) On the computer where the installation is being carried out, open a command prompt and run the following commands (the first 3 are included in this download and are taken from the external repository maintained by Christoph Gohlke(http://www.lfd.uci.edu/~gohlke/pythonlibs/ ))
+  iv.1) C:\>pip install c:\isob-1.0.0\numpy-1.8.2+mkl-cp27-none-win32.whl
+  iv.2) C:\>pip install c:\isob-1.0.0\numexpr-2.4-cp27-none-win32.whl
+  iv.3) C:\>pip install c:\isob-1.0.0\tables-3.1.1-cp27-none-win32.whl
   iv.4) C:\>pip install c:\temp\pathlib-1.0.1.tar.gz
 
 
