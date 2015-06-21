@@ -17,12 +17,13 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/cellzome/isobarquant
+https://github.com/protcode/isob/
 """
 
 # python modules
 import math
-
+import sys
+sys.path.insert(0, '..')
 # commonUtils modules
 from CommonUtils.MascotModificationsHandler import MascotModifications
 
