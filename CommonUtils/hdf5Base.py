@@ -19,7 +19,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/cellzome/isobarquant
+https://github.com/protcode/isob/
 
 """
 
@@ -280,8 +280,28 @@ class hdf5Base:
                 table.flush()
             else:
                 raise ExHa.HDF5consistancyError('Table %s does not have column %s' % (tablePath, col))
-
         return dict(code=0)
+
+    def completely_sorted_index_table(self, table_path, col):
+        # test that the table is present
+        if table_path not in self.tableTOC:
+            raise ExHa.HDF5consistancyError('Table %s does not exist' % table_path)
+        else:
+            # create the table object for data appending
+            table = self.tableTOC[table_path]
+
+        # flush the table data then create the indexes
+        table.flush()
+        if col in table.colnames:
+            col_instance = table.colinstances[col]
+            print 'creating sorted index on %s' % col
+
+            col_instance.createCSIndex()
+            table.flush()
+        else:
+            raise ExHa.HDF5consistancyError('Table %s does not have column %s' % (table_path, col))
+        return dict(code=0)
+
 
     def appendRows(self, tablePath, dataList, keyList=None):
         """

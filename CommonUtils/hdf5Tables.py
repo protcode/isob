@@ -20,7 +20,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/cellzome/isobarquant
+https://github.com/protcode/isob/
 """
 
 import tables as tables
@@ -614,7 +614,7 @@ class Protein(tables.IsDescription):
     """
     @brief HDF5 table definition for mascot modifications table
     """
-    accession = tables.StringCol(15, pos=0)
+    accession = tables.StringCol(255, pos=0)
     mass = tables.Float32Col(pos=1)
     name = tables.StringCol(255, pos=2)
 
@@ -628,7 +628,7 @@ class Seq2Acc(tables.IsDescription):
     @brief HDF5 table definition for links between peptide sequences and protein accessions
     """
     sequence = tables.StringCol(255, pos=0)
-    accession = tables.StringCol(15, pos=1)
+    accession = tables.StringCol(255, pos=1)
     hook = tables.Int32Col(pos=2)
     hookscore = tables.Float32Col(pos=3)
     pepscore = tables.Float32Col(pos=4)
@@ -943,7 +943,7 @@ class ResultPeptide(tables.IsDescription):
     peptide = tables.StringCol(100, pos=3)
     variable_modstring = tables.StringCol(100, pos=4)
     fixed_modstring = tables.StringCol(100, pos=5)
-    positional_modstring = tables.StringCol(350, pos=6)
+    positional_modstring = tables.StringCol(150, pos=6)
     score = tables.Float32Col(pos=7)
     rank = tables.Int32Col(pos=8)
     mw = tables.Float32Col(pos=9)

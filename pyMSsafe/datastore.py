@@ -20,7 +20,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/cellzome/isobarquant
+https://github.com/protcode/isob/
 """
 
 # python modules
@@ -197,11 +197,6 @@ class Datamanager():
 
                 if nspec % 1000 == 0:
                     s2iShelf.sync()
-
-                    # check if this is a LUX job - report to LUX when dot is written
-                    if wfid:
-                        self.updateLux()
-
                 # load the spectrum and noise data
                 spdata, spRow = loadspec(specNum, surveyid, spRow)
                 noise = xRaw.getNoiseData(specNum)
@@ -1440,12 +1435,19 @@ class Datamanager():
         """
 
         hdf = self.hdf
+        self.logs.log.info('started createIndexes')
         hdf.indexTable('/rawdata/ions', ['spec_id', 'mz', 'inten'])
+        self.logs.log.debug('done rawdata ions')
         hdf.indexTable('/rawdata/spectra', ['spec_id'])
+        self.logs.log.debug('done rawdata spectra')
         hdf.indexTable('/rawdata/specparams', ['spec_id'])
+        self.logs.log.debug('done rawdata specparams')
         hdf.indexTable('/rawdata/xicbins', ['specid', 'bin', 'rt', 'inten'])
+        self.logs.log.debug('done rawdata xicbins')
         hdf.indexTable('/rawdata/parameters', ['set'])
+        self.logs.log.debug('done rawdata parmeters')
         hdf.indexTable('/rawdata/noise', ['spec_id'])
+        self.logs.log.debug('done rawdata noise')
         pass
 
     # @staticmethod
@@ -1502,7 +1504,6 @@ class Datamanager():
 
         pBar = progBar.ProgressBar(widgets=progBar.name_widgets, maxval=len(ordered), name='XIC analysis').start()
         # cnt = Counter(total=len(ordered))
-
         cnt = 0
         try:
             for unitkey in ordered:

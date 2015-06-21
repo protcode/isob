@@ -19,17 +19,15 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/cellzome/isobarquant
+https://github.com/protcode/isob/
 """
 
 import sys
 from xml.sax import make_parser
 import numpy as np
 import re
-
-# CommonUtils imports
 sys.path.insert(0, '..')
-
+# CommonUtils imports
 from CommonUtils.MathTools import Statistics
 from CommonUtils.tools import *
 import CommonUtils.ExceptionHandler as ExHa
