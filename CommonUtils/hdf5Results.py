@@ -18,7 +18,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/cellzome/isobarquant
+https://github.com/protcode/isob/
 
 """
 
@@ -70,7 +70,8 @@ class HDF5Results:
         hdf.indexTable('/sample', ['sample_id'])
         hdf.indexTable('/spectrum', ['spectrum_id', 'sample_id'])
         hdf.indexTable('/specquant', ['spectrum_id', 'isotopelabel_id', 'protein_group_no'])
-        hdf.indexTable('/peptide', ['peptide_id', 'spectrum_id', 'protein_group_no'])
+        hdf.completely_sorted_index_table('/peptide', 'protein_group_no')
+        hdf.indexTable('/peptide', ['peptide_id', 'spectrum_id'])
         hdf.indexTable('/proteinhit', ['protein_group_no', 'protein_id'])
         hdf.indexTable('/proteinquant', ['protein_group_no'])
 
@@ -335,16 +336,16 @@ class HDF5Results:
     def getQuantifiedPeptideCounts(self):
         hdf = self.hdf
         tablePath = '/peptide'
-        whereclause = 'is_quantified== 1'
-        potentially_quantfied_peptides = hdf.getDataGeneral(tablePath, whereclause)
+        potentially_quantfied_peptides = hdf.getTable(tablePath)
         protein_group_no2quantpep = {}
-        for data in potentially_quantfied_peptides:
-            if not data['failed_fdr_filter']:
-                protein_group_no = data['protein_group_no']
-                try:
-                    protein_group_no2quantpep[protein_group_no] += 1
-                except KeyError:
-                    protein_group_no2quantpep[protein_group_no] = 1
+        for data in potentially_quantfied_peptides.iterrows():
+            if data['is_quantified'] == 1:
+                if not data['failed_fdr_filter']:
+                    protein_group_no = data['protein_group_no']
+                    try:
+                        protein_group_no2quantpep[protein_group_no] += 1
+                    except KeyError:
+                        protein_group_no2quantpep[protein_group_no] = 1
         return protein_group_no2quantpep
 
     def getProteinQuantData(self):

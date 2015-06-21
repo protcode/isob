@@ -18,7 +18,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here:
-https://github.com/cellzome/isobarquant
+https://github.com/protcode/isob/
 """
 
 from peptideset import PeptideSet
@@ -187,11 +187,13 @@ class PeptideSetManager:
 
     def calcProteinFDR(self):
         peptideSets = self.peptideSets
+        # need to add the picked part of the algorithm; if we find two proteins of the same origin (REV / FWD) then pick
+        # the one with the highest score and remove the other from FDR calculation
         for acc, pepset in peptideSets.iteritems():
             # get rounded top mascot score for peptides in proteinset
             max_score = max([x['pepScore'] for x in pepset.peptideData.values()])
             self.logger.log.debug('setname %s has max_score %s FP: %s' % (acc, max_score, pepset.is_reverse_hit))
-            pepset.max_score = max_score
+            pepset.max_score = round(max_score)
             if not pepset.is_reverse_hit:
                 # if our protein is a FWD (FP) hit
                 try:
