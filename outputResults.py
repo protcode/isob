@@ -18,13 +18,14 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here:
-https://github.com/cellzome/isobarquant
+https://github.com/protcode/isob/
 """
 
 
 import os
 import sys
 from pathlib import Path
+sys.path.insert(0, '..')
 
 from CommonUtils.hdf5Results import HDF5Results
 from CommonUtils.ConfigManager import ConfigManager
@@ -74,7 +75,11 @@ def makemodificationsstring(positional_modstring, peptide):
     template_term = '%s %s; '
     pmods = positional_modstring.split(';')
     for pmod in pmods:
-        mod, pos = pmod.split(':')
+        try:
+            mod, pos = pmod.split(':')
+        except ValueError:
+            print 'error processing positional modstring %s' % positional_modstring
+            return 'n/d'
         peptidepos = int(pos) - 1
         if peptidepos < 0:
             residue = 'N-term'
@@ -89,6 +94,39 @@ def makemodificationsstring(positional_modstring, peptide):
     return modificdations
 
 
+def preparePeptideData(pep, proteins, fdr_data, specs, quant):
+    protein = proteins[pep['protein_group_no']]
+    specID = pep['spectrum_id']
+    fdr_at_score = fdr_data[round(pep['score'])]
+    peptideData = dict(sequence=pep['peptide'],
+                           rank=pep['rank'],
+                           mw=pep['mw'],
+                           ppm_error=pep['ppm_error'],
+                           is_unique=pep['is_unique'], score=pep['score'],
+                           failed_fdr_filter=pep['failed_fdr_filter'],
+                           protein_group_no=pep['protein_group_no'],
+                           protein_ids=protein,
+                           in_protein_inference=pep['in_protein_inference'],
+                           fdr_at_score=fdr_at_score,
+                           seq_start=pep['seq_start'],
+                           seq_end=pep['seq_end'],
+                           positional_modstring=pep['positional_modstring'])
+    peptideData.update(specs[specID])
+
+    if peptideData['positional_modstring']:
+        peptideData['modifications'] = makemodificationsstring(peptideData['positional_modstring'],
+                                                                   peptideData['sequence'])
+    else:
+        peptideData['modifications'] = ''
+    if specID in quant:
+        peptideData.update(quant[specID])
+    else:
+        peptideData['in_quantification_of_protein'] = 0
+
+    peptideData['proteins'] = '|'.join(peptideData['protein_ids'])
+    return peptideData
+
+
 def collectPeptideData(hdfObject, sample2source):
     logger.log.info('generating Peptide based output')
     hdf = hdfObject.hdf
@@ -101,9 +139,11 @@ def collectPeptideData(hdfObject, sample2source):
     for prot in proteinhit:
         try:
             proteins[prot['protein_group_no']].append(prot['protein_id'])
-            pass
+            # it's ok to sort here as we don't expect too many protein ids for the protein group
+            proteins[prot['protein_group_no']].sort()
         except KeyError:
             proteins[prot['protein_group_no']] = [prot['protein_id']]
+
     proteinhit = None
 
     # extract required spectrum data
@@ -152,62 +192,49 @@ def collectPeptideData(hdfObject, sample2source):
     f_out.write(outString + '\n')
     # integrate other data with peptide data and output to text file
     logger.log.info('loading peptide data')
-    peptides = hdf.readTable('/peptide')
-    #  fdr_data corresponds here to peptides!
+    out_string_template = '%(protein_group_no)i\t%(proteins)s\t%(sequence)s\t%(modifications)s\t%(mw)f\t'
+    out_string_template += '%(precursor_mz)f\t%(charge_state)i\t%(ppm_error)f\t%(score).0f\t%(fdr_at_score).3f\t'
+    out_string_template += '%(rank)i\t%(msms_id)i\t%(source_file)s\t%(peak_intensity)f\t%(s2i)f\t%(p2t)f\t'
+    out_string_template += '%(is_unique)i\t%(in_quantification_of_protein)i\t'
+    out_string_template += '%(in_protein_inference)f\t%(seq_start)s\t%(seq_end)s'
     fdr_data = dict([(x['score'], x['global_fdr']) for x in hdf.readTable('/fdrdata') if x['data_type'] == 'peptide'])
-    pBar = progBar.ProgressBar(widgets=progBar.name_widgets, maxval=len(peptides), name='load peptides').start()
-    peptides = sorted(peptides, key=lambda x: x['seq_start'])
-    peptides = sorted(peptides, key=lambda x: x['protein_group_no'])
-    for idx, pep in enumerate(peptides):
+    peptidetable = hdf.getTable('/peptide')  # get reference to peptide table on disk
+    current_pepgroupid = None
+    tmplist = []
+    pBar = progBar.ProgressBar(widgets=progBar.name_widgets, maxval=len(peptidetable), name='load peptides').start()
+    for idx, p in enumerate(peptidetable.itersorted('protein_group_no')):
         pBar.update(idx)
-        protein = proteins[pep['protein_group_no']]
-        specID = pep['spectrum_id']
-        fdr_at_score = fdr_data[round(pep['score'])]
-
-        peptideData = dict(sequence=pep['peptide'],
-                           rank=pep['rank'],
-                           mw=pep['mw'],
-                           ppm_error=pep['ppm_error'],
-                           is_unique=pep['is_unique'], score=pep['score'],
-                           failed_fdr_filter=pep['failed_fdr_filter'],
-                           protein_group_no=pep['protein_group_no'],
-                           protein_ids=protein,
-                           in_protein_inference=pep['in_protein_inference'],
-                           fdr_at_score=fdr_at_score,
-                           seq_start=pep['seq_start'],
-                           seq_end=pep['seq_end'],
-                           positional_modstring=pep['positional_modstring'])
-        peptideData.update(specs[specID])
-
-        if peptideData['positional_modstring']:
-            peptideData['modifications'] = makemodificationsstring(peptideData['positional_modstring'],
-                                                                   peptideData['sequence'])
+        if current_pepgroupid == p['protein_group_no']:
+            tmplist.append(preparePeptideData(p, proteins, fdr_data, specs, quant))
         else:
-            peptideData['modifications'] = ''
-        if specID in quant:
-            peptideData.update(quant[specID])
-        else:
-            peptideData['in_quantification_of_protein'] = 0
+            if tmplist:
+                tmplist = sorted(tmplist, key=lambda y: y['seq_start'])
+                for x in tmplist:
+                    outString = out_string_template % x
+                    for iso in usedIsotopes:
+                        try:
+                            outString += '\t%f' % x[iso]
+                        except KeyError:
+                            outString += '\tNA'
 
-        peptideData['proteins'] = '|'.join(peptideData['protein_ids'])
-
-        # create output string
-        outString = '%(protein_group_no)i\t%(proteins)s\t%(sequence)s\t%(modifications)s\t%(mw)f\t'
-        outString += '%(precursor_mz)f\t%(charge_state)i\t%(ppm_error)f\t%(score).0f\t%(fdr_at_score).3f\t%(rank)i\t'
-        outString += '%(msms_id)i\t%(source_file)s\t%(peak_intensity)f\t%(s2i)f\t%(p2t)f\t%(is_unique)i\t'
-        outString += '%(in_quantification_of_protein)i\t'
-        outString += '%(in_protein_inference)f\t%(seq_start)s\t%(seq_end)s'
-        outString = outString % peptideData
-        for iso in usedIsotopes:
-            try:
-                outString += '\t%f' % peptideData[iso]
-            except KeyError:
-                outString += '\tNA'
-
-        f_out.write(outString + '\n')
-
+                    f_out.write(outString + '\n')
+            tmplist = [preparePeptideData(p, proteins, fdr_data, specs, quant)]
+        current_pepgroupid = p['protein_group_no']
     pBar.finish()
+    # not to forget the last protein groups data in tmplist
+    if tmplist:
+        tmplist = sorted(tmplist, key=lambda y: y['seq_start'])
+        for x in tmplist:
+            outString = out_string_template % x
+            for iso in usedIsotopes:
+                try:
+                    outString += '\t%f' % x[iso]
+                except KeyError:
+                    outString += '\tNA'
+
+            f_out.write(outString + '\n')
     f_out.close()
+    return
 
 
 def collectProteinData(hdfObject):
