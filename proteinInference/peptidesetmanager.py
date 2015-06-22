@@ -270,7 +270,7 @@ class PeptideSetManager:
         for idx, key in enumerate(psKeys):
             psID = protsetIDs[idx]
             pepSet = peptideSets[key]
-            protein_fdr = proteinscore2fdr[pepSet.max_score][3]
+            protein_fdr = proteinscore2fdr[round(pepSet.max_score)][3]
             self.logger.log.debug('protein_fdr %s for protein %s' % (protein_fdr, psID))
             pepSet.protein_group_no = psID
             for acc in pepSet.accessions:
