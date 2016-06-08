@@ -25,7 +25,7 @@ https://github.com/protcode/isob/
 import os
 import sys
 from pathlib import Path
-sys.path.insert(0, '..')
+
 
 from CommonUtils.hdf5Results import HDF5Results
 from CommonUtils.ConfigManager import ConfigManager

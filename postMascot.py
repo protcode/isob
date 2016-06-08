@@ -30,7 +30,7 @@ import time
 from pathlib import Path
 
 # CommonUtils libraries
-sys.path.insert(0, '..')
+#sys.path.insert(0, '..')
 from CommonUtils.ConfigManager import ConfigManager
 from CommonUtils.LoggingManager import Logger
 import CommonUtils.QuantMethodHandler as qmh
@@ -192,10 +192,10 @@ def runProteinQuantification(resultsFile, suffix):
     if ret['code'] == 0:
         logger.log.log(logger.PROCESS, 'running protein quant for %s' % resultsFile.name)
         cmdline = 'python quantifyProteins.py --datadir %s --filename %s' + logFormat
-        cmdline += ' --reference %i'
+        cmdline += ' --reference %i --general.fdrthreshold %s'
         cmdline = cmdline % (str(dataDir), resultsFile.name, cfg.parameters['logging']['logdir'],
                              cfg.parameters['logging']['loglevel'], cfg.parameters['logging']['screenlevel'],
-                             refID)
+                             refID, cfg.parameters['logging']['fdrthreshold'])
 
         logger.log.debug('cmd: %s' % cmdline)
         os.system(cmdline)
