@@ -54,7 +54,7 @@ class QuantifyProtController:
         p2tfilter = 'p2t > %s' % self.cfg.parameters['general']['p2tthreshold']
         s2ifilter = 's2i > %s' % self.cfg.parameters['general']['s2ithreshold']
         mascotfilter = 'score > %s' % self.cfg.parameters['general']['mascotthreshold']
-        fdrfilter = 'fdr_at_score < %s' % self.cfg.parameters['general']['fdrfilter']
+        fdrfilter = 'fdr_at_score < %s' % self.cfg.parameters['general']['fdrthreshold']
         uniquefilter = 'is_unique==1'
         peplengthfilter = 'peptide_length >= %s' % self.cfg.parameters['general']['peplengthfilter']
         deltaseqfilter = '(delta_seq > %s) | (delta_seq == 0)' % self.cfg.parameters['general']['deltaseqfilter']
