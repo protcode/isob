@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -19,7 +19,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 
 """
 
@@ -41,12 +41,15 @@ def reformatException(error):
     exName = sys.exc_info()[0].__name__
 
     if exName == 'WindowsError':
-        error.message = error.strerror
+        error.value = error.strerror
 
     elif len(error.args) > 1:
         # multiple args giving context
-        error.message = error.args[0]
+        error.value = error.args[0]
         addContext(error, error.args[1])
+
+    if hasattr(error, 'message'):
+        error.value = error.message
 
     return
 
@@ -64,11 +67,13 @@ def exportError2File(error, file):
     @param file <string>: containing the path for the error file
     @return:
     """
+    if not hasattr(error, 'value'):
+        reformatException(error)
 
     filePath = Path(file)
 
     # create a dictionary of the error data
-    errorDict = dict(code=1, error=error.message, type=sys.exc_info()[0].__name__, traceback=trimTraceback(),
+    errorDict = dict(code=1, error=error.value, type=sys.exc_info()[0].__name__, traceback=trimTraceback(),
                      repr=oneLineRepr(error))
 
     # add context only if present in the errror
@@ -87,9 +92,11 @@ def multiLineRepr(error):
     @param error <Exception object>: containing the error data
     @return outStr <string>: the formatted output
     """
+    if not hasattr(error, 'value'):
+        reformatException(error)
 
     outStr = '%s' % trimTraceback()
-    outStr += '\nError:    %s\nMessage:  %s' % (sys.exc_info()[0].__name__, error.message)
+    outStr += '\nError:    %s\nMessage:  %s' % (sys.exc_info()[0].__name__, error.value)
     if hasattr(error, 'context'):
         for c in error.context:
             outStr += '\nContext:  %s' % c
@@ -103,7 +110,10 @@ def oneLineRepr(error):
     @param error <Exception object>: containing the error data
     @return outStr <string>: the formatted output
     """
-    outStr = 'Error: %s, Message: %s' % (sys.exc_info()[0].__name__, error.message)
+    if not hasattr(error, 'value'):
+        reformatException(error)
+
+    outStr = 'Error: %s, Message: %s' % (sys.exc_info()[0].__name__, error.value)
     if hasattr(error, 'context'):
         outStr += ', Context:  %s' % (' | '.join(error.context))
 
@@ -127,6 +137,10 @@ class HDFmissingDataError(czException):
 
 
 class HDFindexingError(czException):
+    pass
+
+
+class HDFcommunicationError(czException):
     pass
 
 
@@ -183,6 +197,14 @@ class XICprocessingError(czException):
 
 
 class SpectraProcessingError(czException):
+    pass
+
+
+class QuantificationBatchError(czException):
+    pass
+
+
+class MSdataConsistancyError(czException):
     pass
 
 

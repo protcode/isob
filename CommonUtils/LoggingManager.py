@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -18,7 +18,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 import logging
@@ -29,9 +29,9 @@ class Logger:
     PROCESS = 45
 
     def __init__(self, logPath, logLevel='INFO', screenLevel='INFO', createNew=True):
-        '''
+        """
         logfile needs to be a string and not a WindowsPath
-        '''
+        """
         if createNew:
             fMode = 'w'
         else:
@@ -69,7 +69,7 @@ class Logger:
         self.log = logging.getLogger('pyMSsafe')
         self.dblog = logging.getLogger('db')
 
-    def setProtInferanceLogs(self):
+    def setProtInferenceLogs(self):
         self.log = logging.getLogger('protInference')
         self.hdf5log = logging.getLogger('hdf5log')
 

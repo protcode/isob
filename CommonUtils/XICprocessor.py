@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -19,7 +19,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 import numpy as np
@@ -52,6 +52,7 @@ class XIC:
             self.binsPerDa = int(self.XICparams['binsperda'])
 
         surveyArray = hdf5object.getDataEqual('/rawdata/spectra', 'type', 'ms')
+        self.surveyAll = surveyArray
 
         surveyDic = {}
         idxRT = {}
@@ -213,54 +214,30 @@ class XIC:
 
     def findMaxIntInTimeRange(self, lowRT, highRT, apex):
         xicData = self.xicData
-        surveyRT = self.surveyRT
+        datalocation = (self.xicData['rt'] < highRT) & (self.xicData['rt'] > lowRT)
+        apexlocation = xicData[datalocation]['rt'] == apex
+        if apexlocation.any():
+            apexInten = xicData[datalocation][apexlocation]['inten'][0]
+            apexSpec = xicData[datalocation][apexlocation]['specid'][0]
+        else:
+            apexInten = 0
+            apexSpec = 0
 
-        maxInten = 0
-        apexInten = 0
-        dataList = []
-        minSurvey = 1e5
-        maxSurvey = 0
-        for i in range(len(xicData)):
-            if xicData[i]['rt'] < lowRT:
-                continue
-            elif xicData[i]['rt'] > highRT:
-                break
+        surveydatalocation = (self.surveyAll['rt'] < highRT) & (self.surveyAll['rt'] > lowRT)
+        specList = set(self.surveyAll[surveydatalocation]['spec_id'])
+        newspeclist = specList - set(xicData[datalocation]['specid'])
+        myapexSpec = 0
+        for s in newspeclist:
+            newspecapexloc = (self.surveyAll['spec_id'] == s) & (self.surveyAll['rt'] == apex)
+            if newspecapexloc.any():
+                myapexSpec = self.surveyAll[newspecapexloc]['spec_id'][0]
 
-            if xicData[i]['specid'] < minSurvey:
-                minSurvey = xicData[i]['specid']
-            if xicData[i]['specid'] > maxSurvey:
-                maxSurvey = xicData[i]['specid']
-
-            if xicData[i]['inten'] > maxInten:
-                maxInten = xicData[i]['inten']
-
-            if xicData[i]['rt'] == apex:
-                apexInten = xicData[i]['inten']
-                self.apexSpec = xicData[i]['specid']
-
-            dataList.append((xicData[i]['specid'], xicData[i]['rt'], xicData[i]['inten']))
-
-        # add in any missing spectra
-        # if dataList:
-        #     specList = [x for x in self.surveyDic if minSurvey <= x <= maxSurvey]
-        # else:
-        #     specList = [x for x in surveyRT if lowRT <= surveyRT[x] <= highRT]
-        specList = [x for x in surveyRT if lowRT <= surveyRT[x] <= highRT]
-
-        for d in dataList:
-            if d[0] in specList:
-                specList.remove(d[0])
-
-        if specList:
-            for spec in specList:
-                dataList.append((spec, surveyRT[spec], 0.0))
-                if surveyRT[spec] == apex:
-                    self.apexSpec = spec
-
-        dataList.sort()
-        self.dataList = dataList
-
-        return apexInten
+        if myapexSpec:
+            apexSpec = myapexSpec
+        if apexInten:
+            return apexInten, apexSpec
+        else:
+            return 0, apexSpec
 
     def findPeaksInXIC(self, lowRT, highRT, offset):
         """
@@ -311,9 +288,58 @@ class XIC:
             pass
         return peaks
 
+    def findPeaksInXICNew(self, lowRT, highRT, offset):
+        """
+        @brief controls the peak detection from self.xicData, data is split into segments, processed and then peaks
+        are found in the RT window
+        @param lowRT <float>: low RT point of the RT window
+        @param highRT <float>: high RT point of the RT window
+        @param offset <integer>: offset from the monoisotopic ion
+        @return:
+        """
+        xicData = self.xicData
+        surveys = self.surveyDic
+        lenData = len(xicData)
+        maxGap = self.XICparams['clustgap']
+
+        # initialise variables
+        mzlow = 1000000
+        mzhigh = 0
+        first = 0
+        last = 0
+        end = 0
+        peaks = []
+        lastPosition = surveys[xicData[0]['specid']]
+
+        for x in xrange(lenData):
+
+            currentPosition = surveys[xicData[x]['specid']]
+
+            if currentPosition - lastPosition > maxGap:
+                end = x
+            elif x == lenData - 1:
+                end = lenData
+
+            if end:
+                if end - first > 1:
+                    # more than one point to process
+                    found = self.processSegment(xicData[first:end])
+                    for pk in found:
+                        # only append peaks in the RT range
+                        if lowRT <= pk['rt'] <= highRT:
+                            pk['offset'] = offset
+                            peaks.append([pk])
+
+                first = end
+                end = 0
+
+            lastPosition = currentPosition
+            pass
+        return peaks
+
     def processSegment(self, segment):
         """
-        @brief performs peakwalking on the segment data, copying it into teh smooth array first and performing smoothing
+        @brief performs peakwalking on the segment data, copying it into the smooth array first and performing smoothing
         @param segment <ndarray>: containing the raw ion data
         @return peaks <list>: containing the detected peaks in the segment
         """
@@ -335,6 +361,8 @@ class XIC:
         row = side
         lowRT = self.idxRT[max(self.surveyDic[segment[0]['specid']] - 1, 0)]
         highRT = self.idxRT[min(self.surveyDic[segment[-1]['specid']] + 1, self.maxIdx)]
+
+
         for r in range(side):
             smooth.put(r, (0, lowRT, 0.0, 0.0, 0.0, 0.0))
             smooth.put(len(smooth) - 1 - r, (0, highRT, 0.0, 0.0, 0.0, 0.0))

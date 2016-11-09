@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -19,15 +19,17 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 import sys
 from xml.sax import make_parser
 import numpy as np
 import re
-sys.path.insert(0, '..')
+
 # CommonUtils imports
+sys.path.insert(0, '..')
+
 from CommonUtils.MathTools import Statistics
 from CommonUtils.tools import *
 import CommonUtils.ExceptionHandler as ExHa
@@ -37,23 +39,25 @@ import peptide
 from unimodxmlparser import UnimodXMLParser
 
 rx_pepmaindata = re.compile('q[0-9]+_p[0-9]+$')
+re_reverse = re.compile('(###R[A-Z]{2}###)')
+uniprot_gene_name = re.compile('GN=(\w+)')
 
 
 class Datfile:
-    '''
+    """
     Class representing the information from a Mascot datfile
-    '''
+    """
 
-    def __init__(self, filedic, hdf5, cfg, logs, searchID, quantMethod):
-        '''
+    def __init__(self, filedic, hdf5, cfg, logs, quantMethod):
+        """
         @brief initialise the Datfile object
         @param filedic <dictionary>: containig the full path to the dat file and other file data
         @param hdf5 <hdf5 object>: containing all the writing methods for hdf5 output
         @param cfg <cfg object>: containing all the running parameters
         @param dbobj <db object>: linking to the meet database
-        '''
+        """
         self.filedic = filedic
-        self.searchid = searchID
+        #self.searchid = searchID
         self.quantMethod = quantMethod
         datfilename = filedic['dat']
         if datfilename == str(None):
@@ -76,11 +80,11 @@ class Datfile:
         self.stats = dict(numpeps=0, numfailedpeps=0, numspectra_nopeps=0)
 
     def addMasses(self, massdict):
-        '''
+        """
         @brief takes massdict and converts data to numbers, also groups modification data together, saves data to
                HDF5 file
         @param massdict <dictionary>: containing parsed data from masses section
-        '''
+        """
         # todo: put the ptm's into a separate dictionary
         highIndexMods = {}
         for idx in range(10, 33):
@@ -139,7 +143,7 @@ class Datfile:
             mod = dict(da_delta=0.0, name='', amino='', nl=0.0, nlm=0.0, modtype='fixed')
             data = massdict[f].split(',')
             mod['da_delta'] = float(data[0])
-            end = data[1].find('(')
+            end = data[1].rfind('(')
             mod['name'] = data[1][:end - 1]
             del massdict[f]
 
@@ -176,14 +180,14 @@ class Datfile:
         self.logs.datlog.debug('masses are %s ' % str(massdict))
 
     def isRelevantMod(self, name):
-        '''
+        """
         @brief tests if the modification is a relevant one or not
         @param name <string>: the name of the testing modification
-        '''
+        """
         # regex searching expects uppercase so force conversion
         lcName = name.lower()
         if self.quantMethod:
-            quan = self.quantMethod['meth_type'].lower()
+            quan = self.quantMethod['method_type'].lower()
         else:
             quan = 'xxx'
 
@@ -195,12 +199,12 @@ class Datfile:
             return 1
 
     def addUnimod(self, unimod):
-        '''
+        """
         @brief saves the unimod xml data into a temp file then parses the data
         @param unimod <list>: containing all the xml data for parsing
-        '''
-
-        tmpXML = self.dataDir.joinpath(self.cfg.parameters['general']['tmpxml'])
+        """
+        import random
+        tmpXML = self.dataDir.joinpath(self.cfg.parameters['general']['tmpxml'] + str(random.randrange(0,1000)))
         xmlOut = open(str(tmpXML), 'w')
 
         # strip leading & trailing non xml lines
@@ -230,10 +234,10 @@ class Datfile:
             self.hdfMascot.updateModsWithElements(xml.mods)
 
     def addSummary(self, summary):
-        '''
+        """
         @brief organises the summary data
         @params summary <dictionary>: containint the parsed summary data
-        '''
+        """
         # find all qmass data lines
         specs = [(int(x[5:]), x[5:], x) for x in summary.keys() if x[:5] == 'qmass']
         specs.sort()
@@ -264,10 +268,10 @@ class Datfile:
             self.spectra[query] = spdata
 
     def addETsummary(self, summary):
-        '''
+        """
         @brief organises the summary data
         @params summary <dictionary>: containint the parsed summary data
-        '''
+        """
         # find all qmass data lines
         specs = [(int(x[5:]), x[5:], x) for x in summary.keys() if x[:5] == 'qmass']
         specs.sort()
@@ -298,15 +302,20 @@ class Datfile:
             self.spectra[query] = spdata
 
     def addCalPeptide(self, peps4spec):
-        '''
+        """
         @brief processes the peptide data for a single spectrum
         @param peps4spec <dictionary>: containing all peptides for one spectrum
-        '''
+        """
         stats = self.stats
         cfg = self.cfg
         pepkeys = [x for x in peps4spec.keys() if rx_pepmaindata.search(x)]
         pepkeys.sort()
+        # parameters relating to decoy identifiers
+        usestartswith = 0
+        if cfg.parameters['general']['decoysearchfromstart']:
+            usestartswith = 1
 
+        decoyidentifer =  cfg.parameters['general']['decoyhitidentifier']
         bits = pepkeys[0].split('_')
         query = int(bits[0][1:])
 
@@ -339,12 +348,16 @@ class Datfile:
                     spec[attr] = getattr(pepobj, attr)
 
                 accessions = [x['accession'] for x in pepobj.proteins]
-
-                if len([x for x in accessions if x.startswith('DD') or x.startswith('###REV###') or
-                        x.startswith('###RND###')]) == len(accessions):
-                    hitType = 'REV'
+                if usestartswith:
+                    if len([x for x in accessions if x.startswith(decoyidentifer)]) == len(accessions):
+                        hitType = 'REV'
+                    else:
+                        hitType = 'FWD'
                 else:
-                    hitType = 'FWD'
+                    if len([x for x in accessions if x.find(decoyidentifer) > -1]) == len(accessions):
+                        hitType = 'REV'
+                    else:
+                        hitType = 'FWD'
                 spec['hitType'] = hitType
 
                 # only process one peptide per query
@@ -353,10 +366,10 @@ class Datfile:
                 stats['numfailedpeps'] += 1
 
     def addPeptides(self, peps4spec):
-        '''
+        """
         @brief processes the peptide data for a single spectrum
         @param peps4spec <dictionary>: containing all peptides for one spectrum
-        '''
+        """
         stats = self.stats
         cfg = self.cfg
         pepkeys = [x for x in peps4spec.keys() if rx_pepmaindata.search(x)]
@@ -434,16 +447,16 @@ class Datfile:
         self.logs.datlog.debug('%i peptides pass QC%s' % (len(peplist), hasHook))
 
     def createETpeptidesTable(self):
-        '''
+        """
         @brief creates teh ETpeptides table in the HDF5 file
-        '''
+        """
         self.hdfMascot.createETpeptidesTable()
 
     def addETpeptides(self, peps4spec):
-        '''
+        """
         @brief processes the peptide data for a single spectrum
         @param peps4spec <dictionary>: containing all peptides for one spectrum
-        '''
+        """
         stats = self.stats
 
         pepkeys = [x for x in peps4spec.keys() if rx_pepmaindata.search(x)]
@@ -509,9 +522,9 @@ class Datfile:
                 seq2acc[seq] = dict(prots=pep.proteins[:], hook=pep.is_hook, score=score, bestczrank=pep.czrank)
 
     def doPeptideSetQC(self, peps, isETpep=0):
-        '''
+        """
         @brief triggers the global processing of peptides and storage of global peptide parameters
-        '''
+        """
         # referenced object variables
         analt = self.analtimes
         specs = self.spectra
@@ -557,7 +570,7 @@ class Datfile:
         # copy da_delta scores to the spectrum dictionaries
         if not isModif(modsRelevant):
             # no mods so assign a score of -2000
-            delta_mod = -2000
+            delta_mod = -1
         elif delta_mod < 0:
             # only one sequence copy of that sequence
             delta_mod = score
@@ -572,7 +585,6 @@ class Datfile:
             p = 0
             # add hook to list for estimation of the real run time
             self.hookpeps.append(qry)
-#            print '%s\t%f\t%i' % (peps[0].sequence,peps[0].mass,peps[0].query)
 
             for pep in peps:
                 if pep.czrank == 1:
@@ -598,9 +610,9 @@ class Datfile:
             return True
 
     def doPostPeptides(self):
-        '''
+        """
         @brief triggers the global processing of peptides and storage of global peptide parameters
-        '''
+        """
 
         # make sure the sequence to protein accession data is saved
         self.hdfMascot.writeSeq2Acc(self.seq2acc)
@@ -628,9 +640,9 @@ class Datfile:
         self.hdfMascot.writeStatistics(stats)
 
     def findBestProtein(self):
-        '''
+        """
         @brief use the seq2acc data to calculate the highest scoring protein
-        '''
+        """
 
         protDict = {}
         bestScore = 0
@@ -689,16 +701,36 @@ class Datfile:
         return bestProt
 
     def addProteins(self, proteins):
-        '''
+        """
         @brief processes the protein data for a single spectrum
         @param peps4spec <dictionary>: containing all peptides for one spectrum
-        '''
+        """
         maxname = 0
         protList = []
+        #print proteins, 'proteins'
         for acc in proteins:
             mass, name = proteins[acc].split(',', 1)
-            protList.append(dict(accession=acc, mass=float(mass), name=name[1:-1]))
-            proteins[acc] = dict(mw=float(mass), name=name[1:-1])
+            # if search is done with Uniprot proteome style file then it has format >sp|xxx|zzzz we need to parse out
+            # the xxxx part and also append the reverse tag to it
+            items = acc.split('|')
+            if uniprot_gene_name.search(name[1:-1]):
+                gene_name = uniprot_gene_name.search(name[1:-1]).group(1).upper()
+            else:
+                gene_name = acc
+
+            if len(items) > 2:
+                myaccession = items[1]
+            else:
+                myaccession = items[0]
+
+            if re_reverse.search(items[0]):
+                rev_tag = re_reverse.search(items[0]).group(1)
+                myaccession = rev_tag + myaccession
+                mygene = rev_tag + gene_name
+            else:
+                mygene = gene_name
+
+            protList.append(dict(accession=myaccession, mass=float(mass), name=name[1:-1], gene_name=mygene))
             if len(name) > maxname:
                 maxname = len(name)
 
@@ -706,10 +738,10 @@ class Datfile:
             self.hdfMascot.writeProteins(protList)
 
     def addQuerySpectra(self, query):
-        '''
+        """
         @brief processes the query data including spectra
         @param query <dictionary>: containing the spectral data
-        '''
+        """
         if query['query'] == '1':
             self.logs.datlog.info('Loading query spectral data')
 
@@ -729,18 +761,18 @@ class Datfile:
                 self.logs.datlog.critical('no msmsid for spectrum number %s (%s) ' % (str(num), str(self.spectra[num])))
 
     def doPostParsing(self):
-        '''
+        """
         @brief do the post query parsing events
-        '''
+        """
         # add check here
         self.logs.datlog.info('Writing query data')
         self.hdfMascot.writeQueries(self.spectra)
         self.hdfMascot.createTableIndexes(0)
 
     def doTimeAnalysis(self):
-        '''
+        """
         @brief do the post query parsing events
-        '''
+        """
 
         analt = self.analtimes
         specs = self.spectra
@@ -762,19 +794,19 @@ class Datfile:
         analt['range'] = analt['last'] - analt['first']
 
     def addIndex(self, index):
-        '''
+        """
         @brief writes index data to mascot.index table
         @param index <dictionary>: containing index data
-        '''
+        """
         self.hdfMascot.writeIndex(index)
 
     def parseTitleData(self, title):
-        '''
+        """
         @brief parses the title data from the mascot title string.  Mascot replaces punctuation
         '%2c' = ',', '%3a' = ':' and '%2e' = '.'
         @param title <string>: containing the spectrum TITLE data
         @return titles <dictionary>: containing the parsed values
-        '''
+        """
         self.logs.datlog.debug('Parsing title')
         titles = {}
         expected = {'msmsid': '', 'rt': 0.0, 'surveyid': '', 'parent': 0.0, 'AnalTime': 0.0, 'Activation': None}
@@ -817,12 +849,12 @@ class Datfile:
         return titles
 
     def parseSpectrumIons(self, ionstext):
-        '''
+        """
         @brief parses the spectrum data by first splitting the string into ions then converting
         the mass-intensity strings into a tuple of floats (mass, intensity)
         @param ionstext <string>: with individual ions separated by , and mass-intensity values separated by :
         @return ionslist <list>: containing a list of the ion pairs sorted by mass
-        '''
+        """
 
         ionslist = []
         templist = ionstext.split(',')
@@ -832,75 +864,3 @@ class Datfile:
             ionslist.append((float(data[0]), float(data[1])))
         ionslist.sort()
         return ionslist
-
-    def doQuantitation(self):
-        '''
-        doQuantiation() -> void
-
-        Reads the quantitation data for files that are iTRAQ or SILAC.
-        '''
-
-        # first check if the file is iTRAQ/SILAC
-        rx_quant = re.compile('(_itraq|_silac){1}')
-        file = self.parameterData['COM'].lower()
-        match = rx_quant.search(file)
-        if match:
-            # build up a list of all the spectra to be quantified.
-            self.logs.datlog.debug('File needs quantifying: %s' % self.parameterData['COM'])
-            quandata = {}
-            # specs = self.peptides.keys()
-            specs = self.spectra.keys()
-            specs.sort()
-            for spec in specs:
-                if self.spectra[spec]['origfile'] not in quandata:
-                    quandata[self.spectra[spec]['origfile']] = {}
-                quandata[self.spectra[spec]['origfile']][self.spectra[spec]['origspec']] = spec
-            self.logs.datlog.debug('Quant Spectra: %s' % (str(quandata)))
-
-    def doTopHitQC(self, hit):
-        '''
-        @brief performs QC on the top mascot protein
-        @param hit <dictionary>: containing the protein data
-        '''
-        specs = self.spectra
-        blank = (-1, 0, 0)
-        if hit['score'] > 0:
-            # do the protein QC
-            print '  QC: %s %s (%d/%d)' % (hit['acc'], hit['name'], hit['score'], hit['peps'])
-            peps = {}
-            bsa = self.hdfMascot.getHitPeptides(hit['acc'])
-            cover = {}
-            data = np.ndarray(len(bsa), dtype=[('fwhm', float), ('ppm', float), ('rt', float)])
-            for p in range(len(bsa)):
-                seq = bsa[p]['sequence']
-                specid = self.hdfMascot.getSpecidFromQuery(bsa[p]['query'])
-                header = self.hdfMascot.getsMSMSHeaderFromSpecid(specid)
-
-                drow = (header['fwhm'], bsa[p]['da_delta'] / bsa[p]['mass'] * 1000000, header['rtapex'])
-                if bsa[p]['is_hook']:
-                    data.put(p, drow)
-                else:
-                    data.put(p, blank)
-                peps[seq] = max(peps.get(seq, 0), bsa[p]['score'])
-                for pr in self.seq2acc[seq]['prots']:
-                    if pr['accession'] == hit['acc']:
-                        for i in range(pr['start'], pr['start'] + len(seq)):
-                            cover[i] = 1
-            data.sort(order='fwhm')
-            i = 0
-            while data[i]['fwhm'] == -1:
-                i += 1
-            data = data[i:]
-
-            print '\tscore         = %d' % (np.sum(peps.values()))
-            print '\tnum peptides  = %d' % (len(bsa))
-            print '\tnum hook peps = %d' % len(data)
-            print '\tcoverage      = %.1f %%' % (len(cover) / 6.07)
-            print '\taccuracy (mDa)= %.3f +/- %.3f' % (np.mean(bsa['da_delta']) * 1000, np.std(bsa['da_delta']) * 1000)
-            print '\taccuracy (ppm)= %.2f +/- %.2f' % (np.mean(data['ppm']), np.std(data['ppm']))
-            print '\tRT range      = %.2f to %.2f min' % (self.analtimes['first'], self.analtimes['last'])
-            print '\taverage width = %.1f s (%.1f - %.1f s)' % (np.mean(data['fwhm']) * 60, np.min(data['fwhm']) * 60,
-                                                                np.max(data['fwhm']) * 60)
-            print '\t   capacity   = %.1f' % (self.analtimes['range'] / np.mean(data['fwhm']))
-            print '\tmedian width  = %.1f s' % (np.median(data['fwhm']) * 60)
-            print '\t   capacity   = %.1f' % (self.analtimes['range'] / np.median(data['fwhm']))

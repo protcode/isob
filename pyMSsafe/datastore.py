@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -20,7 +20,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 # python modules
@@ -39,6 +39,7 @@ from CommonUtils.tools import *
 from CommonUtils.ionmanipulation import IonProcessing
 import CommonUtils.progressbar as progBar
 import CommonUtils.ExceptionHandler as ExHa
+from CommonUtils.progressReport import progressReport
 
 # pyMSsafe modules
 from SpectrumProcessor import Processor, IsotopeModel
@@ -46,14 +47,14 @@ from SpectrumProcessor import Processor, IsotopeModel
 stats = Statistics()
 
 
-class Datamanager():
+class Datamanager:
     def __init__(self, xraw, cfg, logs, hdf, quanmeth, tempFile):
         """
         @brief initialises the datamanager object
         @param xraw <object>: the XRawFile object - interface for the Xcalibur data
         @param cfg <object>: containing the configuration data from file (and database when sorted)
         @param hdf <object>: the interface to the hdf5 output file
-        @param quanmeth <string>: the name of the quantitation method
+        @param quanmeth <string>: the name of the quantification method
         @param tempFile <string>: file path string for the shelve data
         """
         # self.w = WMI('.')
@@ -70,7 +71,8 @@ class Datamanager():
         self.mssurvey = {}
         global isomodel
         isomodel = IsotopeModel(cfg, logs, 200, 0.01, quanmeth)
-        self.ishcd = 0
+        self.useOrbi4identification = 0
+        self.useOrbi4quantification = 0
         self.peaks3D = {}
         self.bins = 0
         self.maxspec = 0
@@ -89,11 +91,13 @@ class Datamanager():
         self.units = None
         self.probunits = None
         self.acts = None
-        self.quan = 0
+        self.quantMethod = 0
         self.isotopeIDs = None
         self.coalescence = None
         self.isotopes = None
         self.IonProc = IonProcessing(cfg, self.logs.log)
+        self.scanEvent = 0
+        self.rawFilePath = ''
 
     def addLUXdata(self, job, pid):
         self.job = job
@@ -103,8 +107,8 @@ class Datamanager():
     def processSpectra(self, quan, watch, rawbase):
         """
         @brief controls the analysis of the raw file
-        @param quan <dictionary>: containing the quantiation masses if any
-        @param watch <object>: stopwatch object that recods timings for the analysis
+        @param quan <dictionary>: containing the quantification masses if any
+        @param watch <object>: stopwatch object that records timings for the analysis
         @param rawbase <string>: the stripped filename to use to find the fragmentationmethod
         """
         # functions
@@ -113,16 +117,14 @@ class Datamanager():
         calcbgisos = self.calcBackgroundIsotopes
         fitisotopes = self.fitIsotopes
         processheaderinfo = self.processHeaderInfo
-        wfid = self.wf_id
 
         # data references
         maxspec = self.maxspec
         cfg = self.cfg
         xRaw = self.raw
-        inst = xRaw.getInstMethodNames()[0]
-        self.instrument = inst
+        self.instrument = xRaw.instrument
 
-        num_specs = self.loadParameters(quan)
+        num_specs = self.loadParameters()
         width = self.getIsolationWidth()
 
         # move s2idata to a shelve object
@@ -131,7 +133,6 @@ class Datamanager():
 
         # needs to be referenced after setting the specs array
         msmsspecs = self.specs
-        ishcd = self.ishcd
 
         # test the frag method in the file fits to a defined frag method
         acts = self.acts[1]
@@ -166,6 +167,18 @@ class Datamanager():
             # raise an error to report to LUX
             raise ExHa.FragmentMethodError('Missmatched: Actual %s  vs Expected %s' % (str(acts), str(meth)))
 
+        # set the ishcd status
+        foundHCD = []
+        for u in range(1, len(self.units)):
+            for ev in self.units[u]:
+                if'Orbitrap' in ev['detector']:
+                    if 'I' in ev['use']:
+                        self.useOrbi4identification = 1
+                    if 'Q' in ev['use']:
+                        self.useOrbi4quantification = 1
+
+        self.setQuant(quan)
+
         self.writeUnitData(self.units, self.probunits)
 
         watch.rec('Load parameters')
@@ -176,11 +189,8 @@ class Datamanager():
 
         # load the spectrum data
         specs = xRaw.genSpecNum()
-        if maxspec:
-            pBar = progBar.ProgressBar(widgets=progBar.name_widgets, maxval=maxspec, name='Spectra anal.').start()
-        else:
-            pBar = progBar.ProgressBar(widgets=progBar.name_widgets, maxval=num_specs, name='Spectra anal.').start()
-        # cnt.sec()
+        progRep = progressReport(num_specs, self.rawFilePath.stem, 'processing spectra', 'spectra')
+
         surveyid = 0
         s2ilate = {}
         spRow = -1
@@ -188,27 +198,39 @@ class Datamanager():
 
         nspec = 0
         specNum = 0
+        msSummary = 0
+
+        reportStep = 0.2
+        nextReport = reportStep
+
         try:
             while 1:
                 specNum = specs.next()
                 nspec += 1
-                # rtn = cnt.next()
-                pBar.update(nspec)
+                progRep.report(nspec)
 
                 if nspec % 1000 == 0:
                     s2iShelf.sync()
-                # load the spectrum and noise data
-                spdata, spRow = loadspec(specNum, surveyid, spRow)
+
+                #  load the spectrum and noise data
+                unlinkedUnits = {}
+                if self.instrument.isFusion():
+                    for u in s2ilate:
+                        if len(s2ilate[u]) == 1:
+                            unlinkedUnits[u] = s2idata[u].copy()
+
+                spdata, spRow = loadspec(specNum, surveyid, spRow, unlinkedUnits)
+
                 noise = xRaw.getNoiseData(specNum)
                 if len(noise) > 0:
                     self.writeNoise(specNum, noise)
 
                 if spdata == -1:
-                    # deal with skipped spectra: rejected scan event or missmatched headder data
+                    # deal with skipped spectra: rejected scan event or missmatched header data
                     continue
                 elif spdata == 0:
                     # this is MS/MS data
-                    pBar.nextSecondary()
+                    msSummary['numms2'] += 1
                     # only calculate the s2i data once for each unit
                     unit = msmsspecs[spRow]['unit']
 
@@ -238,9 +260,13 @@ class Datamanager():
 
                     s2ilate[unit] = s2idata[unit]['msms']['specs'].keys()
                 else:
+                    # write the old MS1 spectrum summary
+                    if msSummary:
+                        self.hdf.appendRows('/rawdata/ms1summary', [msSummary])
+
                     # for HCD data make sure the IDspec and QuanSpec are set properly
                     spdata.noise = noise
-                    if ishcd and specNum - surveyid > 1:
+                    if specNum - surveyid > 1:
                         updatemsms(lastUpdated + 1, spRow + 1)
                         lastUpdated = spRow
                     surveyid = specNum
@@ -297,6 +323,8 @@ class Datamanager():
                         s2iShelf[str(unit)] = s2idata.pop(unit)
 
                     s2ilate = {}
+                    msSummary = dict(spec_id=specNum, tic=spdata.tic, sumions=spdata.sumIons, numms2=0,
+                                     basepeak_inten=spdata.basepeak['inten'], basepeak_mass=spdata.basepeak['mass'])
 
                 if maxspec and specNum > maxspec:
                     raise StopIteration
@@ -308,13 +336,12 @@ class Datamanager():
                     s2iunit['late'] = s2iunit['early'].copy()
                     s2iunit['late']['rt'] = s2iunit['msms']['specs'][max(s2iunit['msms']['specs'])]['rt'] + 1.0
                     processheaderinfo(s2iunit)
-            # cnt.end()
-            pBar.finish()
+                    s2iShelf[str(unit)] = s2idata.pop(unit)
+
+            progRep.endReport()
+
             self.logs.log.info('Creating HDF5 indexes')
             self.createIndexes()
-            if wfid:
-                self.updateLux()
-
             self.logs.log.info('spectrum processing finished')
             xRaw.close()
         except:
@@ -662,19 +689,24 @@ class Datamanager():
                 opts.append((midint, calcSumSQ(isos, intens, midint)))
                 opts.append((maxint, calcSumSQ(isos, intens, maxint)))
 
-                while opts[0][1] < opts[1][1]:
+                if opts[0][1] < opts[1][1]:
                     # first point is lowest - need another point lower
                     newint = opts[0][0] / 2
                     opts.append((newint, calcSumSQ(isos, intens, newint)))
                     opts.sort()
                     opts, nextPos = selectLowest(opts)
 
-                while opts[2][1] < opts[1][1]:
+                if opts[2][1] < opts[1][1]:
                     # last point is lowest - need another point
                     newint = opts[2][0] * 2
                     opts.append((newint, calcSumSQ(isos, intens, newint)))
                     opts.sort()
                     opts, nextPos = selectLowest(opts)
+
+                if opts[0][1] < opts[1][1] or opts[2][1] < opts[1][1]:
+                    # single extension of range has not worked - cancel fitting
+                    fits.append((10000, [0, 0], 0, 0, 0))
+                    continue
 
                 if nextPos == -1:
                     opts, nextPos = selectLowest(opts)
@@ -690,7 +722,7 @@ class Datamanager():
             fits.sort()
             return fits[0]
         else:
-            return 0, [0, 0], 0, 0, 0
+            return 10000, [0, 0], 0, 0, 0
 
     @staticmethod
     def selectLowest(data):
@@ -716,7 +748,7 @@ class Datamanager():
 
         return sumsq
 
-    def loadParameters(self, quantMethod):
+    def loadParameters(self):
         """
         @brief loads the parameter information from the raw file and transfers to the hdf5 file
         @param quan <dictionary>: containing the quantiation masses if any
@@ -729,27 +761,19 @@ class Datamanager():
 
         xRaw = self.raw
 
-        if self.instrument == 'LTQ':
-            self.isOrbi = True
-        else:
-            self.isOrbi = False
+        # find the creation date
+        creation = xRaw.getCreationDate()
+        write = [dict(set='Creation', subset='main', parameter='Creation_date', value=creation)]
+        self.hdf.appendRows('/rawdata/parameters', write)
 
         # HPLC method data
         hplc = xRaw.getLCMethods(cfg.parameters['methodnames'])
-        if hplc['analytical']:
+        if len(hplc['analytical']) > 1:
             self.writeLCparameters(hplc, wanted)
 
         # MS method data
         ms, order = self.raw.getMSMethods(cfg.parameters['methodnames']['ms'])
 
-        ishcd = []
-        for ev in ms['activation']:
-            for act in ms['activation'][ev]:
-                if 'HCD' in act:
-                    ishcd.append(len(ms['activation'][ev]))
-                else:
-                    ishcd.append(0)
-        self.ishcd = max(ishcd)
         self.units = ms.pop('units')
         if 'units' in order:
             order.remove('units')
@@ -759,16 +783,19 @@ class Datamanager():
             order.remove('unit problems')
 
         # build list of scan events
-        scanevents = []
-        for i in range(ms['num scan events']):
-            scanevents.append('Scan Event %d' % (i + 1))
+        scanevents = [key for key in ms if key.startswith('Scan Event')]
+        scanevents.sort()
 
-        if self.isOrbi:
-            subsets, scanevents = self.fixScanEvents(wanted['ms_subset'], scanevents)
-            self.writeMSparameters(ms, wanted['ms_param'], subsets, order)
-        else:
-            subsets, scanevents = self.fixScanEvents(wanted['exactive_subset'], scanevents)
-            self.writeExactiveMSparameters(ms, wanted['exactive_param'], subsets, order)
+        if self.instrument.isOrbitrap():
+            subsets, scanevents = self.fixScanEvents(wanted['ms_subset'][:], scanevents)
+            self.writeMSparameters(ms, wanted['ms_param'][:], subsets, order)
+        elif self.instrument.isExactive():
+            subsets, scanevents = self.fixScanEvents(wanted['exactive_subset'][:], scanevents)
+            self.writeExactiveMSparameters(ms, wanted['exactive_param'][:], subsets, order)
+        elif self.instrument.isFusion():
+            subsets, scanevents = self.fixScanEvents(wanted['fusion_subset'][:], scanevents,
+                                                     ms['num scan events'], order)
+            self.writeFusionMSparameters(ms, subsets, order)
 
         self.logs.log.info('MS has %d parameters' % (len(ms)))
 
@@ -780,7 +807,7 @@ class Datamanager():
             self.logs.log.info('Tune has %d parameters' % (len(tune)))
         except:
             self.logs.log.info('No tuning parameters for file')
-        # else: print 'No tuning parameters for file'
+
 
         numSpecs, first, last = xRaw.getNumSpectra()
 
@@ -810,27 +837,31 @@ class Datamanager():
         self.specs = np.ndarray(length, dtype=columns)
         for r in range(length):
             self.specs[r]['spec'] = 0
+        return numSpecs
 
+    def setQuant(self, quantMethod):
         # sort out the quan masses if any
-        self.quan = 0
+        self.quantMethod = 0
         if quantMethod:
-            if quantMethod['source'] == 'ms1':
-                self.quan = 0
+            if 'ms2' in quantMethod['source']:
+                # ms2 quan is part of this method so set the quan
+                self.quantMethod = quantMethod
             else:
-                self.quan = quantMethod
+                # no MS2 quan so set flag to ignore quantification processing
+                self.quantMethod = 0
 
             # have all the quant parameters locally
-            quantTol = cfg.parameters['quantitation']
+            quantTol = self.cfg.parameters['quantification']
 
-            if self.ishcd:
-                # HCD data so set tolerences for HCD accuracy
+            if self.useOrbi4quantification:
+                # HCD data so set tolerances for HCD accuracy
                 quantMethod.update(dict(search=quantTol['hcd_wide_tol'], match=quantTol['hcd_tol']))
             else:
                 # non-HCD low accuracy data
                 quantMethod.update(dict(search=quantTol['trap_wide_tol'], match=quantTol['trap_tol']))
             self.writeIsotopes(quantMethod)
 
-            # extract isotope IDs and any potential coalescnce pairs
+            # extract isotope IDs and any potential coalescence pairs
             idList = []
             isotopes = quantMethod['quantmasses']
             for key in isotopes:
@@ -861,17 +892,31 @@ class Datamanager():
                         isotopes[key] = isotopes[key][0]
                     else:
                         raise ExHa.MSdataConsistancyError('too many items in quant label')
+                isotopes = quantMethod['quantmasses']
+                locateTol = quantMethod['search']
+                flank = max(locateTol * 2, 1.0)
+
+                quantMethod['highMass'] = max([x['mass'] for x in isotopes.values()]) + flank
+                quantMethod['lowMass'] = min([x['mass'] for x in isotopes.values()]) + flank
 
             self.isotopes = quantMethod.copy()
 
-        return numSpecs
+        return
 
     @staticmethod
-    def fixScanEvents(subsets, scanevents):
-        if 'Scan Events' in subsets:
-            subsets.remove('Scan Events')
-            subsets += scanevents
-        return subsets, scanevents
+    def fixScanEvents(wanted, scanevents, msLevels=0, subsets=[]):
+        if 'Scan Events' in wanted:
+            wanted.remove('Scan Events')
+            wanted += scanevents
+
+        if 'MS levels' in wanted:
+            wanted.remove('MS levels')
+            for level in range(1, msLevels + 1):
+                wanted.append('MS level %i' % level)
+                prefix = 'ms%i' % level
+                wanted += [x for x in subsets if x.startswith(prefix)]
+
+        return wanted, scanevents
 
     def writeLCparameters(self, hplc, wanted):
         """
@@ -1102,6 +1147,27 @@ class Datamanager():
         self.hdf.createTable('rawdata', tableData['tableName'], tableData['tableClass'])
 
         self.hdf.appendRows('/rawdata/' + tableData['tableName'], writing)
+        return
+
+    def writeFusionMSparameters(self, ms, wantSubsets, order):
+        """
+        @brief organises the MS parameters for writing to HDF5 file
+        @param ms <dictionary>: containing all the MS parameters
+        @param wantSubsets <list>: containing the subsets to be utilised
+        @param order <list>: containing the order that subsets should be written
+        @return:
+        """
+
+        writing = []
+
+        for subsetName in order:
+            if subsetName in wantSubsets or not wantSubsets:
+                subset = ms[subsetName]
+                for param in subset:
+                    writing.append(dict(set='MS instrument', subset=subsetName, parameter=param, value=subset[param]))
+
+        self.hdf.appendRows('/rawdata/parameters', writing)
+        return
 
     def writeTuneParameters(self, tune, wantParam, wantSubset):
         """
@@ -1133,13 +1199,16 @@ class Datamanager():
 
         writing = []
         # only write the MS/MS unit index = 1
-        for order, unit in enumerate(units[1]):
-            tmp = unit.copy()
-            tmp['unit'] = 1
-            tmp['order'] = order + 1
-            se = str(tmp.pop('scans'))
-            tmp['scanevents'] = se[:100]
-            writing.append(tmp)
+        for i in range(1, len(units)):
+            for order, unit in enumerate(units[i]):
+                tmp = unit.copy()
+                tmp['unit'] = 1
+                tmp['order'] = order + 1
+                se = str(tmp.pop('scans'))
+                tmp['scanevents'] = se[:100]
+                if 'highmz' in tmp:
+                    del tmp['highmz']
+                writing.append(tmp)
 
         if probUnits:
             for p in range(1, len(probUnits)):
@@ -1156,7 +1225,7 @@ class Datamanager():
     def writeIsotopes(self, isotopes):
 
         writing = []
-        method_id = isotopes['meth_id']
+        method_id = isotopes['method_id']
         # batch_id = isotopes['batch_id']
         error = isotopes['match']
 
@@ -1176,7 +1245,7 @@ class Datamanager():
 
         self.hdf.appendRows('/rawdata/isotopes', writing)
 
-    def loadSpectrum(self, spec, lastsurvey, spRow):
+    def loadSpectrum(self, spec, lastsurvey, spRow, unlinkedUnits=dict()):
         """
         @brief loads the spectrum data and spectrum related parameters, triggers the processing of the spectrum
         @param spec <integer>: the spectrum number
@@ -1191,7 +1260,15 @@ class Datamanager():
         xRaw = self.raw
 
         header = xRaw.getSpectrumHeader(spec)
-        event = int(header['extra']['Scan Event'])
+        if self.instrument.isFusion():
+            # fusion instruments don't use scan events
+            if header['filter']['scan'] == 'ms':
+                event = 1
+            else:
+                event = 2
+        else:
+            event = int(header['extra']['Scan Event'])
+
         if event in cfg.parameters['general']['skipscanevents']:
             # scan event not wanted so skip all processing
             return -1, spRow
@@ -1201,10 +1278,17 @@ class Datamanager():
         else:
             correctionFactors = {}
         data = xRaw.getSpectrumData(spec)
-        scanevent = int(header['extra']['Scan Event'])
+
+        if event > self.scanEvent:
+            self.scanEvent = event
+        elif event == 2:
+            self.scanEvent += 1
+        elif event == 1:
+            self.scanEvent = 1
+
         meth = {}
 
-        if scanevent > 1:
+        if self.scanEvent > 1:
             if header['filter']['scan'] == 'ms':
                 # raise MSdataConsistancyError('Spectrum %d error: Using MS scan filter for scan event = %d' %
                 #                              (spec, scanevent))
@@ -1212,28 +1296,53 @@ class Datamanager():
                 # allows the error to be skipped
                 return -1, spRow
 
-        elif scanevent == 1 and header['filter']['scan'] != 'ms':
+        elif self.scanEvent == 1 and header['filter']['scan'] != 'ms':
             # allows the error to be skipped
             return -1, spRow
 
-        for ev in range(len(units)):
-            for frag in range(len(units[ev])):
-                if scanevent in units[ev][frag]['scans']:
-                    if ev == 0:
+        if self.instrument.isFusion():
+            # need to find the method data in a different way for Fusion instruments
+             for ev in range(len(units)):
+                for frag in range(len(units[ev])):
+                    event = units[ev][frag]
+                    if ev == 0 and self.scanEvent == 1:
                         meth = 'ms'
-                    else:
+                    elif event['ms_level'] == 2:
+                        # ms2 data
                         if frag == 0:
                             self.unitnum += 1
-                        meth = dict(unitnum=self.unitnum, unit=ev, order=frag + 1, scanevent=scanevent,
-                                    act=units[ev][frag]['activation'], use=units[ev][frag]['use'])
+                        meth = dict(unitnum=self.unitnum, unit=ev, order=frag + 1, scanevent=self.scanEvent,
+                                    act=event['activation'], use=event['use'])
+                    elif event['ms_level'] == 3:
+                        # ms3 data: find the corresponding MS2 event
+                        setMass = float(header['filter']['setmass1'])
+                        for unitNum in unlinkedUnits:
+                            unlinked = unlinkedUnits[unitNum]
+                            if unlinked['setmass'] == setMass:
+                                meth = dict(unitnum=unitNum, unit=ev, order=frag + 1, scanevent=self.scanEvent,
+                                            act=event['activation'], use=event['use'])
+
+                if meth:
                     break
-            if meth:
-                break
+        else:
+            for ev in range(len(units)):
+                for frag in range(len(units[ev])):
+                    if self.scanEvent in units[ev][frag]['scans']:
+                        if ev == 0:
+                            meth = 'ms'
+                        else:
+                            if frag == 0:
+                                self.unitnum += 1
+                            meth = dict(unitnum=self.unitnum, unit=ev, order=frag + 1, scanevent=self.scanEvent,
+                                        act=units[ev][frag]['activation'], use=units[ev][frag]['use'])
+                        break
+                if meth:
+                    break
         if meth:
             self.currmeth = meth
         else:
             raise ExHa.MSdataConsistancyError('Spectrum %i error: Unable to find event method for event %i' %
-                                              (spec, scanevent))
+                                              (spec, self.scanEvent))
 
         if meth == 'ms':
             # handle MS survey spectra
@@ -1259,11 +1368,11 @@ class Datamanager():
                 self.logs.log.debug('Monoisotopic value is zero.')
                 recalc = 1
             elif mono > float(header['filter']['setmass1']) + 0.5:
-                # probabaly a miss calculated data value
+                # probably a miss calculated data value
                 self.logs.log.debug('Monoisotopic value too high.')
                 recalc = 1
             elif header['extra']['Charge State'] == '0':
-                # probabaly a miss calculated data value
+                # probably a mis-calculated data value
                 self.logs.log.debug('Charge state = 0')
 
             if recalc:
@@ -1279,18 +1388,18 @@ class Datamanager():
                     header['extra']['Monoisotopic M/Z'] = '%.4f' % prec[0]
                     header['extra']['Charge State'] = str(prec[1])
 
-            # header['prec_mz'] = self.surveydata.findion(float(header['extra']['Monoisotopic M/Z']))
-
             # handle MS/MS spectra
             smdata = SpectrumManager(spec, data, header, cfg, self.specproc, lastsurvey)
-            # usehcd = 0
 
-            # do the quantitation
+            specSummary = dict(spec_id=spec, tic=smdata.tic, sumions=smdata.sumIons, sumrepions=0.0, sumfragions=0.0)
+
+            # do the quantification
             sumrepint = 0
             sumreparea = 0
 
             ionFillTime = float(header['extra']['Ion Injection Time (ms)'])
-            if self.quan and 'Q' in meth['use']:
+            if self.quantMethod and 'Q' in meth['use']:
+                quantIons = None
 
                 quantIons = smdata.findReporterIons(self.isotopes, self.lastQuant, self.coalescence)
 
@@ -1303,26 +1412,34 @@ class Datamanager():
                     for labelID in quantIons['isos']:
                         ion = quantIons['isos'][labelID]
                         ion['area'] = ion['inten'] * ionFillTime
+                    specSummary['sumrepions'] = quantIons['sumint']
+                    specSummary['sumfragions'] = smdata.sumIons - quantIons['sumint']
                     ionp.doIsotopeCorrection(correctionFactors, quantIons['isos'])
                     sumrepint = quantIons['sumint']
                     sumreparea = quantIons['sumint'] * ionFillTime
-                    self.writeQuanData(spec, quantIons, lastsurvey, ionFillTime, self.quan)
+                    self.writeQuanData(spec, quantIons, lastsurvey, ionFillTime, self.quantMethod)
                     self.offsets.append(quantIons['offset_mean'])
                     if quantIons['num'] >= self.lastQuant[0]:
                         self.lastQuant = (quantIons['num'], quantIons['offset_mean'])
 
             # create base entry for the header array - no id/quan spec info
-            ns = (spec, meth['unitnum'], meth['order'], meth['scanevent'], float(header['extra']['Monoisotopic M/Z']),
-                  0, 0, int(header['extra']['Charge State']), 0, float(header['filter']['setmass1']), lastsurvey, 0, 0,
-                  header['rt'], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                  header['filter']['frag1'], float(header['filter']['energy1']), sumrepint, sumreparea)
+            if header['filter']['scan'] == 'ms2':
+                ns = (spec, meth['unitnum'], meth['order'], meth['scanevent'],
+                      float(header['extra']['Monoisotopic M/Z']), 0, 0, int(header['extra']['Charge State']), 0,
+                      float(header['filter']['setmass1']), lastsurvey, 0, 0, header['rt'], 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, header['filter']['frag1'], float(header['filter']['energy1']), sumrepint, sumreparea)
+            elif header['filter']['scan'] == 'ms3':
+                ns = (spec, meth['unitnum'], meth['order'], meth['scanevent'],
+                      float(header['extra']['Monoisotopic M/Z']), 0, 0, int(header['extra']['Charge State']), 0,
+                      float(header['filter']['setmass1']), lastsurvey, 0, 0, header['rt'], 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, header['filter']['frag2'], float(header['filter']['energy2']), sumrepint, sumreparea)
 
             spRow += 1
 
             self.specs.put([spRow], ns)
             self.hdf.appendRows('/rawdata/spectra', [dict(spec_id=spec, rt=header['rt'],
                                                           type=header['filter']['scan'])])
-
+            self.hdf.appendRows('/rawdata/ms2summary', [specSummary])
             if smdata.ions:
                 self.writeMSMSions(spec, smdata.ions, header['rt'])
             self.writeSpectrumParameters(spec, header, cfg.parameters['wanted']['extra_param'])
@@ -1341,8 +1458,20 @@ class Datamanager():
         writing = []
 
         # first add selected extra parameters
+        extraParams = parameters['extra']
         for want in wanted:
-            writing.append(dict(spec_id=specID, set='extra', parameter=want, value=parameters['extra'].get(want, '')))
+            writing.append(dict(spec_id=specID, set='extra', parameter=want, value=extraParams.get(want, '')))
+
+        if self.instrument.isFusion():
+            # need to add SPS masses if any
+
+            for i in range(1, 21):
+                key = 'SPS Mass %i' % i
+                if key in extraParams:
+                    if float(extraParams[key]) > 0.0:
+                        writing.append(dict(spec_id=specID, set='extra', parameter=key, value=extraParams[key]))
+                    else:
+                        break
 
         # then add all the filter parameters
         for key in parameters['filter']:
@@ -1435,35 +1564,15 @@ class Datamanager():
         """
 
         hdf = self.hdf
-        self.logs.log.info('started createIndexes')
         hdf.indexTable('/rawdata/ions', ['spec_id', 'mz', 'inten'])
-        self.logs.log.debug('done rawdata ions')
         hdf.indexTable('/rawdata/spectra', ['spec_id'])
-        self.logs.log.debug('done rawdata spectra')
         hdf.indexTable('/rawdata/specparams', ['spec_id'])
-        self.logs.log.debug('done rawdata specparams')
         hdf.indexTable('/rawdata/xicbins', ['specid', 'bin', 'rt', 'inten'])
-        self.logs.log.debug('done rawdata xicbins')
         hdf.indexTable('/rawdata/parameters', ['set'])
-        self.logs.log.debug('done rawdata parmeters')
         hdf.indexTable('/rawdata/noise', ['spec_id'])
-        self.logs.log.debug('done rawdata noise')
+        hdf.indexTable('/rawdata/ms1summary', ['spec_id'])
+        hdf.indexTable('/rawdata/ms2summary', ['spec_id'])
         pass
-
-    # @staticmethod
-    # def getIsootopeData(peak, theory):
-    #     # theoretical data
-    #     expect = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0}
-    #     for i in range(min(4, len(theory))):
-    #         expect[i] = theory[i]
-    #     # found data
-    #     found = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0}
-    #     for isodata in peak['isotopes']:
-    #         iso = isodata[0] - peak['offset']
-    #         if iso in [0, 1, 2, 3]:
-    #             found[iso] = isodata[1]
-    #
-    #     return found, expect
 
     def processXICs(self):
         """
@@ -1485,7 +1594,7 @@ class Datamanager():
         cfg = self.cfg
         ppm = cfg.parameters['general']['tolppm']
         mda = cfg.parameters['general']['tolmda']
-        wfid = self.wf_id
+        #wfid = self.wf_id
 
         # open shelve object
         precursorShelf = shelve.open(self.tempFile, protocol=2)
@@ -1502,8 +1611,11 @@ class Datamanager():
         for i, s in enumerate(specs):
             specindex[s['spec']] = i
 
-        pBar = progBar.ProgressBar(widgets=progBar.name_widgets, maxval=len(ordered), name='XIC analysis').start()
+        # pBar = progBar.ProgressBar(widgets=progBar.name_widgets, maxval=len(ordered), name='XIC analysis').start()
         # cnt = Counter(total=len(ordered))
+
+        progRep = progressReport(len(ordered), self.rawFilePath.stem, 'processing XIC', 'precursors')
+
         cnt = 0
         try:
             for unitkey in ordered:
@@ -1511,7 +1623,8 @@ class Datamanager():
 
                 cnt += 1
                 posspeaks = []
-                pBar.update(cnt)
+                # pBar.update(cnt)
+                progRep.report(cnt)
 
                 unit = precursorShelf[unitkey[1]]
 
@@ -1643,7 +1756,8 @@ class Datamanager():
                 sw.stop()
                 self.logs.log.debug('%i\t%.5f\t%.2f\t%s' % (unitkey[0], unit['basemass'], unit['rt'],
                                                             sw.result[-1]['split']))
-            pBar.finish()
+            # pBar.finish()
+            progRep.endReport()
 
         except:
             # other exceptions
@@ -1728,7 +1842,8 @@ class Datamanager():
         @param start <integer>: low end of the range to update
         @param stop <integer>: high end of the range to update
         """
-        ishcd = self.ishcd
+        units = self.units[1]
+
         # find the data that needs updating
         new = {}
         specs = self.specs
@@ -1736,30 +1851,24 @@ class Datamanager():
             if specs[spec]['monomz'] > 0:
                 new.setdefault(specs[spec]['setmass'], []).append(spec)
 
-        # now test the data
         for mz in new:
-            if ishcd == 1 or len(new[mz]) == 1:
-                for sp in new[mz]:
-                    specs[sp]['quanspec'] = specs[sp]['spec']
-                    specs[sp]['idspec'] = specs[sp]['spec']
-            elif len(new[mz]) % ishcd == 0:
-                for j in range(0, len(new[mz]), 2):
-                    first = new[mz][j]
-                    second = new[mz][j + 1]
-                    if specs[first]['quanspec'] == 0:
-                        specs[first]['quanspec'] = specs[second]['quanspec']
-                        specs[second]['idspec'] = specs[first]['idspec']
-                    elif specs[second]['quanspec'] == 0:
-                        specs[second]['quanspec'] = specs[first]['quanspec']
-                        specs[first]['idspec'] = specs[second]['idspec']
-            else:
-                lspecs = []
-                for j in new[mz]:
-                    lspecs.append(specs[spec]['spec'])
+            # find the assigned usage
+            idspec = 0
+            quanspec = 0
+            for id in new[mz]:
+                use = units[specs[id]['order'] - 1]['use']
 
-                msg = 'Unexpected MS/MS pattern %i events together not %i (%s)' % (len(new[mz]), max(1, ishcd),
-                                                                                   ','.join(lspecs))
-                raise ExHa.MSdataConsistancyError(msg)
+                if 'I' in use:
+                    idspec = specs[id]['spec']
+                if 'Q' in use:
+                    quanspec = specs[id]['spec']
+
+            # now assign the idspec and quanspec
+            for id in new[mz]:
+                specs[id]['quanspec'] = quanspec
+                specs[id]['idspec'] = idspec
+
+        return
 
     def calcBackgroundIsotopes(self, specID, survey):
         """
@@ -1774,6 +1883,10 @@ class Datamanager():
         cfgS2I = self.cfg.parameters['sig2interf']
         winfull = cfgS2I['winfull']
         winscaled = cfgS2I['winscaled']
+        if winscaled > cfgS2I['precwindow']:
+            precwin = winscaled
+        else:
+            precwin = cfgS2I['precwindow']
         neutron = self.cfg.parameters['general']['neutron']
         maxIso = self.cfg.parameters['deisotoping']['max_isotopes']
         intenScale = cfgS2I['intenscale']
@@ -1786,14 +1899,17 @@ class Datamanager():
         high = mz + winscaled
         lowfull = mz - winfull
         highfull = mz + winfull
-        # isorange = winfull * 2
+        preclow = mz - precwin
+        prechigh = mz + precwin
+
         mda = self.cfg.parameters['general']['tolmda']
         ppm = self.cfg.parameters['general']['tolppm']
         error = max(mda, isomz * ppm)
         matchby = cfgS2I['matchby']
 
         # extract ions from the isolation window
-        ions = [x for x in msions if low <= x['mz'] <= high]
+        precions = msions[(msions['mz'] >= preclow) & (msions['mz'] <= prechigh)]
+        ions = precions[(precions['mz'] >= low) & (precions['mz'] <= high)]
 
         background = 0
         isoions = {}
@@ -1803,16 +1919,20 @@ class Datamanager():
         isoset = isomodel.findIsotopeSet(mz * msms['preccharge'], 2)
         isomzs = [(i, isomz + i * neutron / msms['preccharge']) for i in range(1 - len(isoset['inten']), maxIso)]
 
-        if ions:
+        if len(ions) > 0:
             # calculate the background
+            modions = []
             iso = 0
             stop = 0
             for ion in ions:
-                if ion['mz'] < lowfull or ion['mz'] > highfull:
-                    inten = ion['inten'] * intenScale
-                else:
+                if lowfull <= ion['mz'] <= highfull:
                     inten = ion['inten']
-                background += inten
+                    background += inten
+                elif low <= ion['mz'] <= high:
+                    inten = ion['inten'] * intenScale
+                    background += inten
+                else:
+                    inten = 0
 
                 # skip to the next isotope if needed
                 while ion['mz'] > isomzs[iso][1] + error:
@@ -1895,7 +2015,7 @@ class Datamanager():
             pass
 
 
-class SpectrumManager():
+class SpectrumManager:
     def __init__(self, specID, data, header, cfg, specproc, lastsurvey=0):
         """
         @param id <integer>: the spectrum number
@@ -1913,16 +2033,26 @@ class SpectrumManager():
         self.processor = specproc
         self.binsPerDa = cfg.parameters['xic']['binsperda']
         self.mininten = 0
+        self.tic = header['tic']
+        self.basepeak = dict(mass=header['basepeak_mass'], inten=header['basepeak_inten'])
 
         if header['filter']['scan'] in ('ms2', 'ms3'):
             self.survey = lastsurvey
             self.data = 0
             if header['filter']['centroid'] == 'c':
                 self.ions = data
+                sumIons = 0.0
+                for ion in data:
+                    sumIons += ion[1]
+                self.sumIons = sumIons
                 self.isProfile = False
             elif header['filter']['centroid'] == 'p':
                 self.data = 0
                 self.ions, minint = self.processor.process(data, pick='gaussian', isMS2=1)
+                sumIons = 0.0
+                for ion in self.ions:
+                    sumIons += ion['topint']
+                self.sumIons = sumIons
                 self.isProfile = True
         else:
             self.data = data
@@ -1944,6 +2074,7 @@ class SpectrumManager():
         columns = [('bin', int), ('peaktop', int), ('mz', float), ('inten', float), ('area', float),
                    ('logint', float), ('logarea', float)]
         self.ions = np.array(iontuples, dtype=columns)
+        self.sumIons = np.sum(self.ions['inten'])
 
     def findReporterIons(self, repIons, lastQuant, coalescence):
 
@@ -1966,8 +2097,10 @@ class SpectrumManager():
             inten = 1
 
         # find the mass range of the reporter ion region
+        # could probably set this once elsewhere
         lowMass = isotopes[isotopeIDlist[0]]['mass']
         highMass = isotopes[isotopeIDlist[0]]['mass']
+
         for isotopeID in isotopeIDlist:
             if isotopes[isotopeID]['mass'] > highMass:
                 highMass = isotopes[isotopeID]['mass']
@@ -2002,7 +2135,10 @@ class SpectrumManager():
 
         # sort the starting deltas and create the startDeltas list of dictionaries
         deltas.sort()
+
         startDeltas = []
+
+
         for d in deltas:
             startDeltas.append(dict(offset_seed=d, isos={}))
 
@@ -2071,10 +2207,76 @@ class SpectrumManager():
         else:
             return {}
 
+    def findReporterIonsNEW(self, repIons, lastQuant, coalescence):
+        vals = [tuple(each.values()) for each in self.ions]
+        dt = np.dtype([('right',int),('minright',float), ('logint', float), ('index',int), ('area', float),
+                     ('minleft', float), ('logarea',float),('topmz',float), ('inten', float), ('left', int),
+                     ('top',int),('mz', float)])
+        spectrum = np.array(vals, dt)
+
+        spec = spectrum[(spectrum['mz'] < repIons['highMass']) & (spectrum['mz'] > repIons['lowMass'])]
+        # measure all possible starting points
+
+        deltas = []
+        # extract what the exact reporter masses are supposed to be.
+        reporterMasses = [(x['mass'], x['id']) for x in repIons['quantmasses'].values()]
+        for repmass, iso_id in reporterMasses:
+            deltas += list(spec['mz'][abs(spec['mz'] - repmass ) <= repIons['search']] - repmass)
+
+        deltas.sort()
+        newbest = list()
+        best_delta_found = None
+        for nd in deltas:
+            all_ers = []
+            sum_int = 0
+            repions = dict()
+
+            for repmass, iso_id in reporterMasses:
+                mz_in_tol = abs(spec['mz'] - repmass - nd) <= repIons['match']
+                if mz_in_tol.any():
+                    maxInt = max(spec['inten'][mz_in_tol])
+
+                    most_intens_rep_ion = spec['inten'] == maxInt
+
+                    ers = spec['mz'][most_intens_rep_ion] - repmass
+                    all_ers += list(ers)
+                    sum_int += sum(spec['inten'][most_intens_rep_ion])
+                    repions[iso_id] = dict(mz=spec[most_intens_rep_ion]['mz'], iso_id=iso_id,
+                                        inten=spec[most_intens_rep_ion]['inten'],
+                                        delta=spec[most_intens_rep_ion]['mz']-repmass,
+                                        minleft=spec[most_intens_rep_ion]['minleft'],
+                                        minright=spec[most_intens_rep_ion]['minright'],
+                                        coalescence=0)
+
+            diff2last = abs(stats.mean(all_ers) - lastQuant[1])
+            newbest.append((len(repions), sum_int, all_ers, repions, nd, diff2last))
+        newbest = sorted(newbest, key=lambda x: (-x[0], -x[1], -x[5]))
+        if newbest:
+            min_repion_allowed = newbest[0][0] - 2
+            rep_ion_number_analysed = []
+            highest_sum_intensities = 0
+            for best in newbest:
+                if best[0] in rep_ion_number_analysed or best[0] < min_repion_allowed:
+                    continue
+                else:
+                    if best[1] > highest_sum_intensities:
+                        best_delta_found = best
+                        highest_sum_intensities = best[1]
+            best_delta_dict = dict(offset_seed=best_delta_found[4],offset_mean=np.mean(best_delta_found[2]),
+                                  offset_range=max(best_delta_found[2]) - min(best_delta_found[2]),
+                                  sumint=best_delta_found[1], num=len(best_delta_found[3]),
+                                  diff2last=best_delta_found[5],
+                                  isos=best_delta_found[3])
+            self.findCoalescence(best_delta_dict, coalescence, lastQuant)
+
+            return best_delta_dict
+        else:
+            return {}
+
     def findCoalescence(self, isotopes, coalescence, lastQuant):
         offset = isotopes['offset_mean']
-        tol = self.cfg.parameters['quantitation']['coalescence_tol']
-        remThresh = self.cfg.parameters['quantitation']['ionremthresh']
+        tol = self.cfg.parameters['quantification']['coalescence_tol']
+        remThresh = self.cfg.parameters['quantification']['ionremthresh']
 
         if isotopes['offset_range'] < 2 * tol:
             return
@@ -2105,25 +2307,38 @@ class SpectrumManager():
                 else:
                     highIso['coalescence'] = highIso['minleft'] / highIso['inten']
             elif lowDelta > tol:
-                # lowIso has moved and highIso missing or not moved
+                # lowIso has moved more than half way to center and highIso missing or not moved
                 if pair[2] + offset - lowIso['mz'] < lowDelta:
-                    # lowIon is fully coalesced
-                    lowIso['coalescence'] = 1
-                    if highIso and highIso['inten'] / lowIso['inten'] < remThresh:
-                        # highIso present and v low intensity - so eliminate
-                        del isotopes['isos'][pair[1]]
-                        repIonStats = self.calcRepIonStats(isotopes['isos'], lastQuant)
-                        isotopes.update(repIonStats)
+                    # lowIso is in fully coalesced zone
+                    if not highIso:
+                        # no highIso
+                        lowIso['coalescence'] = 1
+                    elif lowIso['inten'] / highIso['inten'] < remThresh:
+                        # highIso present and high intensity - so lowIso is likely not real
+                        lowIso['coalescence'] = 1
+                    elif lowIso['minright'] == 0:
+                        # isotope resolved to baseline
+                        lowIso['coalescence'] = -1
+                    else:
+                        # incompletely resolved
+                        lowIso['coalescence'] = lowIso['minright'] / lowIso['inten']
 
             elif highDelta > tol:
-                # highIso has moved and lowIso missing or not moved
+                # highIso has moved more than half way to center and lowIso missing or not moved
                 if highIso['mz'] - pair[2] - offset < highDelta:
-                    highIso['coalescence'] = 1
-                    if lowIso and lowIso['inten'] / highIso['inten'] < remThresh:
-                        # lowIso present and v low intensity - so eliminate
-                        del isotopes['isos'][pair[0]]
-                        repIonStats = self.calcRepIonStats(isotopes['isos'], lastQuant)
-                        isotopes.update(repIonStats)
+                    # highIso is in fully coalesced zone
+                    if not lowIso:
+                        # no lowIso
+                        highIso['coalescence'] = 1
+                    elif highIso['inten'] / lowIso['inten'] < remThresh:
+                        # lowIso present and high intensity - so highIso is likely not real
+                        highIso['coalescence'] = 1
+                    elif highIso['minleft'] == 0:
+                        # isotope resolved to baseline
+                        highIso['coalescence'] = -1
+                    else:
+                        # incompletely resolved
+                        highIso['coalescence'] = highIso['minleft'] / highIso['inten']
 
     @staticmethod
     def calcRepIonStats(repIonSet, lastQuant):

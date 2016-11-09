@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -18,7 +18,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 import re
@@ -27,7 +27,7 @@ import numpy as np
 
 
 # regex for the parsing of the FILTER field
-REGEX = '(?P<analyser>[I|F]TMS) \+ (?P<centroid>[a-z]) [N|E]SI (det=(?P<det>\d*.\d*) )?'
+REGEX = '(?P<analyser>[I|F]TMS) \+ (?P<centroid>[a-z]) [N|E]SI (det=(?P<det>\d*.\d*) )?(sps )?'
 REGEX += '(?P<xers>([a-zA-Z] )*)(?P<mode>Full|Z|SIM) ((?P<lock>lock) )?(?P<scan>ms[1-9]?) '
 REGEX += '((?P<setmass1>\d*.\d*)@(?P<frag1>[a-z]*)(?P<energy1>\d*.\d*) )?'
 REGEX += '((?P<setmass2>\d*.\d*)@(?P<frag2>[a-z]*)(?P<energy2>\d*.\d*) )?'
@@ -72,7 +72,10 @@ def parseParameterList(data, wanted=''):
 
             if param_val[0][:3] == '===':
                 # create new subdirectory
-                subname = param_val[0][4:-6]
+                subname = param_val[0].replace("=", "")
+                subname = subname.replace(":", "")
+                subname = subname.strip()
+                # subname = param_val[0][4:-6]
             else:
                 subname = ''
             # clear the old data ready for the new subdictionary
@@ -262,6 +265,14 @@ def parseLTQ(data, skipEvents):
                 subname = 'Scan Event ' + param_val[0]
                 event = newEventNum
                 eventdic = dict(Type=param_val[1])
+
+                if eventdic['Type'].startswith('ITMS'):
+                    # this is iontrap data
+                    eventdic['detector'] = 'IonTrap'
+                elif eventdic['Type'].startswith('FTMS'):
+                    # this is iontrap data
+                    eventdic['detector'] = 'Orbitrap'
+
                 oldEventNum = newEventNum
             except:
                 if param_val[0][:10] == 'Scan Event':
@@ -276,13 +287,16 @@ def parseLTQ(data, skipEvents):
             try:
                 if usincmasses:
                     globalParentMasses.append(formatGlobalMasses(param_val[0], inctitles, inclens))
+                    numInc += 1
                 else:
                     masses = formatRejectMasses(param_val[0], rejecttitles)
                     for m in masses:
-                        data = {'MS Mass': float(m['Mass']), 'Start (min)': m['Start (min)'],
+                        data = {'MS Mass': float(m['Mass']), 'Name': '', 'Start (min)': m['Start (min)'],
                                 'End (min)': m['End (min)'], 'MS FAIMS CV': '0', 'MS Normalized Collision Energy': '0',
                                 'MS Charge State': '0', 'MS Intensity Threshold': '0', 'MS2 Mass': '0',
-                                'MS2 Normalized Collision Energy': '0', 'Name': ''}
+                                'MS2 Normalized Collision Energy': '0',
+                                }
+                        numInc += 1
                         globalParentMasses.append(data)
 
             except ValueError:
@@ -401,6 +415,175 @@ def string2float(value):
     except ValueError:
         val = -1
     return val
+
+
+def parseFusion(data):
+    """
+    @brief Parses Lumos/Fusion type instrument parameters, no attempt is made to convert the value strings.
+    @param data <list>: list of parameter/value pairs
+    @return a dictionary of the wanted values
+    """
+    groups = {'Global Settings': 'main', 'Experiment 1': 'Experiment', 'Scan MasterScan': 'MS level 1',
+              'Scan ddMSnScan': 'MS level ', 'Internal Cal Positive': 'Internal Cal',
+              'Internal Cal Negative': 'Internal Cal'}
+    params = {}
+    order = ['Identification']
+    special = 0
+    lastLevel = 0
+    prefix = ''
+
+    paramlist = formatFusionList(data)
+
+    # handle first lines as special:  they hold identification data
+    first = paramlist.pop(0)[0]
+    floc = first.find(' Method')
+    second = paramlist.pop(0)[0]
+    sloc1 = second.find(': ') + 2
+    sloc2 = second.find('\\')
+    params['Identification'] = {'Model': first[:floc], 'Hardware Id': second[sloc1:sloc2]}
+
+    for idx, pvl in enumerate(paramlist):
+        param = pvl[0]
+        val = ''
+        level = pvl[-1]
+        if len(pvl) > 2:
+            # has value
+            val = pvl[1]
+
+        if param in groups:
+            # parameter is a group name
+            set = groups[param]
+            subset = ''
+            special = 0
+
+            if set == 'MS level ':
+                # this is MSn level so need to find the level
+                level = paramlist[idx + 1][1]
+                set += level
+                prefix = 'ms%s: ' % level
+                params[set] = dict()
+            elif set == 'MS level 1':
+                prefix = 'ms1: '
+                params[set] = dict()
+            elif set == 'Internal Cal':
+                prefix = ''
+                special = 2
+                params[set] = dict(Polarity=param[13:])
+            else:
+                prefix = ''
+                params[set] = dict()
+
+            order.append(set)
+        elif val:
+            # true parameter
+            if param == 'Method Duration (min)':
+                params[set]['MS Run Time (min)'] = val
+            else:
+                params[set][param] = val
+        elif param == 'Scan Event 1':
+            # handle the Decision: Scan Event 1 parameter
+            nextParam = paramlist[idx + 1]
+            if nextParam[0].startswith('Intensity'):
+                # this is part of the Decision group
+                parts = nextParam[0].split(': ')
+                parts.append(nextParam[-1])
+                paramlist[idx + 1] = parts
+            else:
+                # this is the main scan event 1 group
+                set = 'Experiment'
+                prefix = ''
+        else:
+            if special == 1 and lastLevel == level:
+                # handle the parameters without = in them
+                parts = param.split(' is ')
+                if len(parts) == 1:
+                    # has no is so split on space
+                    parts = param.split(' ')
+
+                params[set][parts[0]] = parts[1]
+            elif special == 2:
+                # used to handle lock mass (internal cal) data
+                try:
+                    val = float(param)
+                    params[set]['m/z'] = param
+                except ValueError:
+                    pass
+            else:
+                # new subgroup
+                set = prefix + param
+                params[set] = dict()
+                order.append(set)
+                if param in ['Filter PrecursorIonExclusion', 'Filter IsobaricTagExclusion']:
+                    special = 1
+                else:
+                    special = 0
+        lastLevel = level
+
+    # create scan event 1 from MS1 data
+    msLevels = [key for key in params if key.startswith('MS level')]
+    msLevels.sort()
+    activationDict = {}
+    unitDict = {}
+    unitNum = 0
+
+    for msLevel in msLevels:
+        data = params[msLevel]
+        if 'Scan Range (m/z)' in data:
+            span = data['Scan Range (m/z)'].split('-')
+            highmz = float(span[1])
+            lowmz = float(span[0])
+        else:
+            highmz = 0.0
+            lowmz = 0.0
+
+        resolution = int(data['Orbitrap Resolution'].replace('K', '000'))
+
+        if msLevel == 'MS level 1':
+            order.append('Scan Event 1')
+            params['Scan Event 1'] = dict(group='MS event', highmz=highmz, lowmz=lowmz,
+                                          resolution=resolution,  microscans=int(data['Microscans']),
+                                          detector=data['Detector Type'])
+            unitDict[unitNum] = [dict(highmz=highmz, lowmz=lowmz, resolution=resolution, scans=[1], ms_level=1,
+                                      detector=data['Detector Type'])]
+
+        else:
+            # create scan events for higher levels of MSn
+            level = int(data['MSn Level'])
+            event = 'Scan Event %i' % level
+            order.append(event)
+            eventDict = dict(resolution=resolution, activation=data['ActivationType'],
+                             isolation=float(data['Isolation Window']), energy=float(data['Collision Energy (%)']),
+                             lowmz=lowmz, highmz=highmz, colenergysteps=0.0, ms_level=level,
+                             colenergywidth=float(data['Stepped Collision Energy (%)']), detector=data['Detector Type'])
+            params[event] = eventDict.copy()
+            params[event]['group'] = 'MS%i event' % level
+            params[event]['repeats'] = int(data['Top N'])
+
+            eventDict['acttime'] = -1.0
+            eventDict['scans'] = [level]
+
+            # now find unit to put event in
+            if level == 2:
+                # MS2 data must start a new unit
+                unitNum += 1
+                unitDict[unitNum] = [eventDict.copy()]
+                activationDict[unitNum] = [data['ActivationType']]
+
+            if level == 3:
+                # MS3 must be tied to previous MS2 event
+                unitDict[unitNum].append(eventDict.copy())
+                activationDict[unitNum].append(data['ActivationType'] + '3')
+                pass
+
+    # add activation and unit data
+    params['units'] = unitDict
+    order.append('units')
+    params['unit problems'] = 0
+
+    params['activation'] = activationDict
+    params['num scan events'] = len(msLevels)
+
+    return params, order
 
 
 def parseQExative(data):
@@ -569,12 +752,12 @@ def parseQExative(data):
     params['num scan events'] = 2
     order.append('units')
     params['units'] = {0: [], 1: []}
-    params['units'][0].append({'highmz': se1['highmz'], 'lowmz': se1['lowmz'],
-                               'resolution': se1['resolution'], 'scans': [1]})
-    params['units'][1].append({'acttime': -1.0, 'activation': se2['activation'], 'resolution': se2['resolution'],
-                               'energy': se2['energy'], 'isolation': se2['isolation'], 'lowmz': se2['lowmz'],
-                               'colenergysteps': se2['ces'], 'colenergywidth': se2['cew'],
-                               'scans': [x + 2 for x in range(se2['repeats'])]})
+    params['units'][0].append(dict(highmz=se1['highmz'], lowmz=se1['lowmz'], detector=se2['detector'],
+                                   resolution=se1['resolution'], scans=[1]))
+    params['units'][1].append(dict(acttime=-1.0, activation=se2['activation'], resolution=se2['resolution'],
+                                   energy=se2['energy'], isolation=se2['isolation'], lowmz=se2['lowmz'],
+                                   colenergysteps=se2['ces'], colenergywidth=se2['cew'], detector=se2['detector'],
+                                   scans=[x + 2 for x in range(se2['repeats'])]))
     params['activation'] = {1: ['HCD']}
     order.append('unit problems')
     params['unit problems'] = 0
@@ -640,7 +823,17 @@ def formatExactiveList(unformatted):
                     inclist = []
                 elif l.strip()[:4] == 'Mass':
                     # field names for the inclusion list
-                    if l.find('Formula') != -1:
+                    if l.find('(N)CE') != -1:
+                        inctitles = ['Mass', 'Formula', 'Species', 'CS', 'Polarity', 'Start', 'End', 'NCE', 'MSX',
+                                     'ID', 'Comment']
+                        # lengths of the inclusion list fields
+                        inclens = [10, 8, 8, 4, 9, 6, 7, 6, 4, 3, 1]
+                    elif l.find('MSX') != -1:
+                        inctitles = ['Mass', 'Formula', 'Species', 'CS', 'Polarity', 'Start', 'End', 'NCE', 'MSX',
+                                     'ID', 'Comment']
+                        # lengths of the inclusion list fields
+                        inclens = [10, 8, 8, 4, 9, 6, 6, 6, 4, 3, 1]
+                    elif l.find('Formula') != -1:
                         inctitles = ['Mass', 'Formula', 'Species', 'CS', 'Polarity', 'Start', 'End', 'NCE', 'Comment']
                         # lengths of the inclusion list fields
                         inclens = [10, 8, 8, 4, 9, 7, 7, 5, 30]
@@ -683,6 +876,44 @@ def formatExactiveList(unformatted):
     return data
 
 
+def formatFusionList(unformatted):
+    """
+    @brief Parses instrument parameters, no attempt is made to convert the value strings.
+    @param unformatted <string>: string of parameters and values
+    @return a list of the split parameter - value pairs
+    """
+
+    data = []
+    inclist = []
+    # remove unwanted special characters
+    unformatted = unformatted.replace('\xb2', '2')
+    unformatted = unformatted.replace('\x97', '-')
+    # allow splitting for tune file
+    lines = unformatted.replace('Tunefile', 'Tunefile ').split('\r\n')
+
+    special = 0
+    for l in lines:
+        if l in ['', '  ']:
+            # skip blank lines
+            continue
+        else:
+            # parameter not blank line
+            param_val = l.split('= ', 1)
+            param = param_val[0]
+            if param.startswith('\t'):
+                # indented: use number of tabs as level indicator
+                level = param.count('\t', 0, 5)
+                param_val.append(level)
+                param_val[0] = param.strip()
+            else:
+                param_val.append(0)
+
+            if param_val[0] != '':
+                data.append(param_val)
+
+    return data
+
+
 def formMSMSevent(msms):
     """
     @brief takes Exactive "dd-MS2 / dd-SIM" parameters to make Scan Event 2
@@ -690,15 +921,22 @@ def formMSMSevent(msms):
     @return event <dictionary>: containing the LTQ type event parameters
     """
 
-    event = {'group': 'MS2 event',
-             'resolution': int(msms['Resolution'].replace(',', '')),
-             'activation': 'HCD'}
-    key = 'NCE'
-    if 'NCE / stepped NCE' in msms:
-        key = 'NCE / stepped NCE'
+    event = dict(group='MS2 event',
+                 resolution=int(msms['Resolution'].replace(',', '')),
+                 activation='HCD',
+                 detector='Orbitrap')
+
+    if 'NCE' in msms:
+        nce = msms['NCE']
+    elif 'NCE / stepped NCE' in msms:
+        nce = msms['NCE / stepped NCE']
+    elif '(N)CE / stepped (N)CE' in msms:
+        nce = msms['(N)CE / stepped (N)CE']
+    else:
+        nce = '0'
 
     try:
-        event['energy'] = float(msms[key])
+        event['energy'] = float(nce.strip().split()[-1])
     except ValueError:
         event['energy'] = 0.0
 
@@ -728,10 +966,12 @@ def formMSevent(fullms):
     """
     span = fullms['Scan range'].split()
 
-    event = {'group': 'MS event',
-             'resolution': int(fullms['Resolution'].replace(',', '')),
-             'highmz': float(span[2]),
-             'microscans': int(fullms['Microscans']), 'lowmz': float(span[0])}
+    event = dict(group='MS event',
+                 resolution=int(fullms['Resolution'].replace(',', '')),
+                 highmz=float(span[2]),
+                 detector='Orbitrap',
+                 microscans=int(fullms['Microscans']),
+                 lowmz=float(span[0]))
 
     return event
 
@@ -750,7 +990,7 @@ def updateeventdic(eventdic):
         loc2 = eventdic['Type'].find(' from')
         eventdic['group'] = eventdic['Type'][ms2:loc2]
     elif ms3 > 0:
-        # MS3 event need to link it to the MS2 event it is derived from
+        # MS3 event need to link it to the MS2 event it is derrived from
         eventdic['group'] = eventdic['Type'][ms3:]
         loc = eventdic['Type'].find('(')
         loc2 = eventdic['Type'].find(')')
@@ -856,7 +1096,7 @@ def parseLCparameters(unformatted):
                 # special section for the pump flow conditions
                 points = int(param_val[1])
                 profile = par[:-7]
-                prof = dict(numpts=points)
+                prof = dict(numpts=points, pts=[])
             elif par[3:] == 'Profile':
                 # new layout with profile data on one line
                 pts = param_val[1].split('|')
@@ -880,10 +1120,7 @@ def parseLCparameters(unformatted):
             units = val_unit[1].split(',')
             # convert to dictionary
             dic = dict(t=vals[0], t_unit=units[0], flow=vals[1], flow_unit=units[1])
-            try:
-                prof['pts'].append(dic)
-            except:
-                prof['pts'] = [dic]
+            prof['pts'].append(dic)
 
             # once all the points have been collected then add to the main dictionary
             if points == 0:
@@ -1011,15 +1248,16 @@ def parseEvents(ms_param, skipEvents):
                 res = scanevent['resolution']
             else:
                 res = -1
-            data = {'highmz': scanevent['high mz'], 'lowmz': scanevent['low mz'], 'scans': [num], 'resolution': res}
+            data = dict(highmz=scanevent['high mz'], lowmz=scanevent['low mz'], scans=[num], resolution=res,
+                        detector=scanevent['detector'])
             if 0 in scanevents:
                 scanevents[0]['scans'].append(num)
             else:
                 scanevents[0] = [data.copy()]
         elif scanevent['group'] == 'NDD event':
             params = scanevent['MS/MS'].split()
-            data = {'activation': params[1], 'energy': float(params[3][:-1]), 'isolation': float(params[9]),
-                    'scans': [num]}
+            data = dict(activation=params[1], energy=float(params[3][:-1]), isolation=float(params[9]),
+                        scans=[num], ms_level=2, detector=scanevent['detector'])
             scanevents[0] = [data.copy()]
         else:
             if scanevent['Activation Type'] == 'HCD':
@@ -1041,12 +1279,12 @@ def parseEvents(ms_param, skipEvents):
                 colsteps = -1
                 colwidth = -1
 
-            data = {'activation': scanevent['Activation Type'], 'isolation': float(scanevent['Isolation Width']),
-                    'energy': float(scanevent['Normalized Coll. Energy']), 'lowmz': lowmz, 'scans': [num],
-                    'resolution': res, 'acttime': float(scanevent['Activation Time']), 'colenergysteps': colsteps,
-                    'colenergywidth': colwidth}
+            data = dict(activation=scanevent['Activation Type'], isolation=float(scanevent['Isolation Width']),
+                        energy=float(scanevent['Normalized Coll. Energy']), lowmz=lowmz, scans=[num],
+                        resolution=res, acttime=float(scanevent['Activation Time']), colenergysteps=colsteps,
+                        colenergywidth=colwidth, ms_level=2, detector=scanevent['detector'])
 
-            if 'ms2' in scanevent:
+            if 'ms3' in scanevent:
                 # this is MS3 data and needs to be linked to the correct MS2 scan
                 found = 0
                 for unit in scanevents:

@@ -2,11 +2,11 @@
 
 """This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -20,17 +20,21 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here:
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 # python libraries
 import sys
 import os
 import time
+import multiprocessing
 from pathlib import Path
 
-# CommonUtils libraries
+from CommonUtils.tools import MasterQueue
 
+
+# CommonUtils libraries
+sys.path.insert(0, '..')
 from CommonUtils.ConfigManager import ConfigManager
 from CommonUtils.LoggingManager import Logger
 import CommonUtils.QuantMethodHandler as qmh
@@ -41,6 +45,52 @@ import CommonUtils.ExceptionHandler as ExHa
 
 
 logFormat = ' --logging.logdir %s --logging.loglevel %s --logging.screenlevel %s'
+
+
+class MS1Quant:
+    def execute(self, rundata):
+        datFile, hdf5file, dataDir, runDir = rundata
+        runtimepath = os.path.dirname(os.path.abspath(__file__))
+        ms1dir = runDir / Path('MS1quantification')
+        os.chdir(str(ms1dir.resolve()))
+
+        cmdline = 'python MS1QuantController.py --datadir "%s" --datfile %s --filename %s' + logFormat
+        cmdline = cmdline % (dataDir, datFile, hdf5file, cfg.parameters['logging']['logdir'],
+                             cfg.parameters['logging']['loglevel'], cfg.parameters['logging']['screenlevel'])
+
+        os.system(cmdline)
+        os.chdir(runDir)
+
+        hdf5path = Path(hdf5file).stem + '.error'
+        ret = fetchError(dataDir.joinpath(hdf5path))
+        ret['cmdline'] = cmdline
+        return ret
+
+
+class MascotParse:
+    def execute(self, rundata):
+        datFile, hdf5file, dataDir, runDir = rundata
+        runtimepath = os.path.dirname(os.path.abspath(__file__))
+        ms1dir = runDir / Path('mascotParser')
+        os.chdir(str(ms1dir.resolve()))
+        cmdline = 'python mascotParser.py --datadir "%s" --datfile %s' + logFormat
+        cmdline += ' --hdf5file %s --general.minhooklength %s --general.delta %s'
+        cmdline = cmdline % (dataDir, datFile, cfg.parameters['logging']['logdir'], cfg.parameters['logging']['loglevel'],
+                             cfg.parameters['logging']['screenlevel'], hdf5file,
+                             cfg.parameters['general']['minhooklength'], cfg.parameters['general']['delta'])
+
+        os.system(cmdline)
+        os.chdir(runDir)
+
+        hdf5path = Path(hdf5file).stem + '.error'
+        ret = fetchError(dataDir.joinpath(hdf5path))
+        logger.log.log(logger.PROCESS, 'Finished MascotParser successfully for %s' % hdfFile)
+        ret['cmdline'] = cmdline
+        return ret
+
+
+
+jobQueue = MasterQueue
 
 
 def checkFilePresence(dataDir):
@@ -89,21 +139,42 @@ def checkFilePresence(dataDir):
     return foundFiles, missingFiles
 
 
-def runMascotParser(datFile, hdf5file, dataDir):
+def runMascotParserOLD(datFile, hdf5file, dataDir):
 
     logger.log.log(logger.PROCESS, 'Starting mascotParser for %s' % datFile)
-
-    cwd = os.getcwd()
-    os.chdir('mascotParser')
+    runtimepath = os.path.dirname(os.path.abspath(__file__))
+    os.chdir('%s/mascotParser' % runtimepath)
     general = cfg.parameters['general']
-    cmdline = 'python mascotParser.py --datadir %s --datfile %s' + logFormat
+    cmdline = 'python mascotParser.py --datadir "%s" --datfile %s' + logFormat
     cmdline += ' --hdf5file %s --general.minhooklength %s --general.delta %s'
     cmdline = cmdline % (dataDir, datFile, cfg.parameters['logging']['logdir'], cfg.parameters['logging']['loglevel'],
                          cfg.parameters['logging']['screenlevel'], hdf5file, general['minhooklength'], general['delta'])
 
     logger.log.debug('cmd: %s' % cmdline)
     os.system(cmdline)
-    os.chdir(cwd)
+    os.chdir(runtimepath)
+
+    hdf5path = Path(hdf5file).stem + '.error'
+    ret = fetchError(dataDir.joinpath(hdf5path))
+    ret['cmdline'] = cmdline
+
+    return ret
+
+
+def runMS1QuantificationOLD(datFile, hdf5file, dataDir):
+
+    logger.log.log(logger.PROCESS, 'Starting MS1Quantification for %s' % datFile)
+
+    runtimepath = os.path.dirname(os.path.abspath(__file__))
+    os.chdir('%s/MS1quantification' % runtimepath)
+    general = cfg.parameters['general']
+    cmdline = 'python MS1QuantController.py --datadir "%s" --datfile %s --filename %s' + logFormat
+    cmdline = cmdline % (dataDir, datFile, hdf5file, cfg.parameters['logging']['logdir'],
+                         cfg.parameters['logging']['loglevel'], cfg.parameters['logging']['screenlevel'])
+
+    logger.log.warning('cmd: %s' % cmdline)
+    os.system(cmdline)
+    os.chdir(runtimepath)
 
     hdf5path = Path(hdf5file).stem + '.error'
     ret = fetchError(dataDir.joinpath(hdf5path))
@@ -126,18 +197,18 @@ def runProteinInference(fileList):
         resultFile = '%s_%s_%s' % (dataDir.name[:25],  Path(fileList[0]).stem, suffix)
         logger.log.log(logger.PROCESS, infoStr % fileListString)
 
-    cwd = os.getcwd()
-    os.chdir('proteinInference')
+    runtimepath = os.path.dirname(os.path.abspath(__file__))
+    os.chdir('%s/proteinInference' % cfg.runtimepath)
 
     general = cfg.parameters['general']
-    cmdline = 'python proteinInference.py --datadir %s --filelist %s --resultfilename %s' + logFormat
+    cmdline = 'python proteinInference.py --datadir "%s" --filelist %s --resultfilename %s' + logFormat
     cmdline += ' --general.fdrthreshold %s '
     cmdline = cmdline % (str(dataDir), fileListString, resultFile, cfg.parameters['logging']['logdir'],
                          cfg.parameters['logging']['loglevel'], cfg.parameters['logging']['screenlevel'],
                          general['fdrthreshold'])
 
     if quantMeth:
-        cmdline += ' --quantmethod_id %s' % quantMeth['meth_id']
+        cmdline += ' --quantmethod_id %s' % quantMeth['method_id']
     else:
         cmdline += ' --quantmethod_id none'
 
@@ -152,34 +223,40 @@ def runProteinInference(fileList):
     if ret['code'] == 0:
 
         # add in the parameters from pymssafe if successfully ran protein inference
-        os.chdir(cwd)
-        preCfg = ConfigManager(Path('./preMascot.cfg'))
+        preCfg = ConfigManager(Path('%s/preMascot.cfg' % runtimepath))
         hdf = HDF5Results(resultPath)
         hdf.appendOpen()
         hdf.addConfigParameters(preCfg.parameters, 'preMascot', '1 pyMSsafe')
         hdf.close()
+        if not quantMeth:
+            # only run top3 at this point if we're not dealing with quant data,
+            # otherwise run after proteinQuantification
+            cmdline = 'python top3quant.py --datadir "%s"  --filename %s' + logFormat
+            cmdline = cmdline % (str(dataDir), resultFile, cfg.parameters['logging']['logdir'],
+                                 cfg.parameters['logging']['loglevel'], cfg.parameters['logging']['screenlevel'])
+            os.chdir('%s/proteinInference' % cfg.runtimepath)
+            os.system(cmdline)
 
         ret = fetchError(dataDir.joinpath(resultPath.stem + '.error'))
         ret['resultfile'] = resultPath
         ret['suffix'] = suffix
         ret['cmdline'] = cmdline
 
-    os.chdir(cwd)
+    os.chdir(cfg.runtimepath)
     return ret
 
 
-def runProteinQuantification(resultsFile, suffix):
-    cwd = os.getcwd()
-    os.chdir('proteinQuantification')
+def runProteinQuantification(resultsFile, suffix, doS2Icorrection):
+    runtimepath = os.path.dirname(os.path.abspath(__file__))
+    os.chdir('%s/proteinQuantification' % cfg.runtimepath)
 
-    if cfg.parameters['general']['run_corrects2iquant']:
+    if doS2Icorrection:
         logger.log.log(logger.PROCESS, 'running correctS2Iquant for %s' % resultsFile.name)
-        cmdline = 'python correctS2Iquant.py --datadir %s --filename %s' + logFormat
+        cmdline = 'python correctS2Iquant.py --datadir "%s" --filename %s' + logFormat
         cmdline = cmdline % (str(dataDir), resultsFile.name, cfg.parameters['logging']['logdir'],
                              cfg.parameters['logging']['loglevel'], cfg.parameters['logging']['screenlevel'])
         logger.log.debug('cmd: %s' % cmdline)
         os.system(cmdline)
-
         # test for errors in correctS2Iquant
         resultPath = dataDir.joinpath(resultsFile)
         ret = fetchError(dataDir.joinpath(resultPath.stem + '.error'))
@@ -191,15 +268,15 @@ def runProteinQuantification(resultsFile, suffix):
 
     if ret['code'] == 0:
         logger.log.log(logger.PROCESS, 'running protein quant for %s' % resultsFile.name)
-        cmdline = 'python quantifyProteins.py --datadir %s --filename %s' + logFormat
-        cmdline += ' --reference %i --general.fdrthreshold %s'
+        cmdline = 'python quantifyProteins.py --datadir "%s" --filename %s' + logFormat
+        cmdline += ' --reference %i  --general.fdrthreshold %s '
         cmdline = cmdline % (str(dataDir), resultsFile.name, cfg.parameters['logging']['logdir'],
                              cfg.parameters['logging']['loglevel'], cfg.parameters['logging']['screenlevel'],
                              refID, cfg.parameters['general']['fdrthreshold'])
 
         logger.log.debug('cmd: %s' % cmdline)
         os.system(cmdline)
-        os.chdir(cwd)
+        os.chdir(cfg.runtimepath)
 
         resultPath = dataDir.joinpath(resultsFile)
         ret = fetchError(dataDir.joinpath(resultPath.stem + '.error'))
@@ -207,14 +284,29 @@ def runProteinQuantification(resultsFile, suffix):
         ret['suffix'] = suffix
         ret['cmdline'] = cmdline
 
-    os.chdir(cwd)
+        if ret['code'] == 0 and quantMeth:
+            # only run top3 at this point if we're dealing with quant data
+            os.chdir(cfg.runtimepath)
+            cmdline = 'python top3quant.py --datadir "%s"  --filename %s' + logFormat
+            cmdline = cmdline % (str(dataDir), resultsFile.name, cfg.parameters['logging']['logdir'],
+                                 cfg.parameters['logging']['loglevel'], cfg.parameters['logging']['screenlevel'])
+
+            os.chdir('%s/proteinInference' % cfg.runtimepath)
+            os.system(cmdline)
+
+            ret = fetchError(dataDir.joinpath(resultPath.stem + '.error'))
+            ret['resultfile'] = resultPath
+            ret['suffix'] = suffix
+            ret['cmdline'] = cmdline
+
+    os.chdir(cfg.runtimepath)
     return ret
 
 
 def runOutput(suffix):
     logger.log.log(logger.PROCESS, 'creating output for files like %s' % suffix)
 
-    cmdline = 'python outputResults.py --datadir %s --filefilter *%s' + logFormat
+    cmdline = 'python outputResults.py --datadir "%s" --filefilter *%s' + logFormat
     cmdline = cmdline % (str(dataDir), suffix, cfg.parameters['logging']['logdir'],
                          cfg.parameters['logging']['loglevel'], cfg.parameters['logging']['screenlevel'])
     os.system(cmdline)
@@ -325,7 +417,9 @@ def askQuestionAbortDeleteUse():
         print '\nMascot data has been detected in all .HDF5 files.  Do you want to?'
         print '  1) Abort the analysis'
         print '  2) Delete the existing Mascot data and use the new Mascot data for the analysis'
-        print '  3) Continue the analysis with the current data'
+        print '         (including MS1 based peptide qunatification where applicable)'
+        print '  3) Run the protein inference on the existing Mascot data'
+        print '         (only protein level quantification will be re-done)'
         userResponse = raw_input('Please enter 1, 2 or 3: ')
 
         if userResponse in responses:
@@ -352,6 +446,7 @@ def askQuestionAbortDelete():
         print '\nMascot data has been detected in the .HDF5 file.  Do you want to?'
         print '  1) Abort the analysis'
         print '  2) Delete the existing Mascot data and use the new Mascot data for the analysis'
+        print '         (including MS1 based peptide qunatification where applicable)'
         userResponse = raw_input('Please enter 1 or 2: ')
 
         if userResponse in responses:
@@ -370,6 +465,7 @@ if __name__ == '__main__':
     configPath = './postMascot.cfg'
     cfg = ConfigManager(configPath)
     ret = cfg.evaluateCommandLineArgs(sys.argv)
+    cfg.runtimepath = os.path.dirname(os.path.abspath(__file__))
 
     pID = os.getpid()
 
@@ -411,7 +507,7 @@ if __name__ == '__main__':
 
             userResponse = None
             while userResponse not in ['Y', 'N']:
-                userResponse = raw_input('Start processing only for the present files? [Y/N]: ').upper()
+                userResponse = raw_input('Start processing only for the files present? [Y/N]: ').upper()
 
             if userResponse == 'Y':
                 startProcessing = True
@@ -425,6 +521,7 @@ if __name__ == '__main__':
     datList = sorted(foundFiles.keys())
     runMascot = False
     quantMeth = None
+    quanttodo = []
     if startProcessing:
         filesWimports = [foundFiles[x]['imports'] for x in foundFiles if foundFiles[x]['imports']]
         if len(filesWimports) == len(foundFiles):
@@ -446,25 +543,70 @@ if __name__ == '__main__':
         for datFile in datList:
             hdfFile = foundFiles[datFile]['.hdf5']
             quantMeth = getQuantMethod(hdfFile)
+            doMS1quant = False
             if quantMeth:
                 refID = assignReferneceLabel()
+                doMS1quant = 'ms1' in quantMeth['source']
+                doMS2quant = 'ms2' in quantMeth['source']
+                if cfg.parameters['general']['run_corrects2iquant'] and doMS2quant:
+                    doS2Icorrection = True
+                else:
+                    doS2Icorrection = False
 
             if runMascot:
-
-                ret = runMascotParser(datFile, hdfFile, dataDir)
+                jobQueue.todoList.put_nowait((datFile, hdfFile, dataDir, os.path.dirname(os.path.abspath(__file__))))
+                #ret = runMascotParser(datFile, hdfFile, dataDir)
+                ret = dict(code = 0)
                 if ret['code'] == 0:
-                    logger.log.info('Finished MascotParser successfully for %s' % hdfFile)
+                    pass
                 else:
                     logger.log.warning('MascotParser failed for %s: %s' % (hdfFile, ret['error']))
                     logger.log.warning('cmd: %s' % ret['cmdline'])
                     continue
 
+                if doMS1quant:
+
+                    # MS1 quant method so run MS1Quantification
+                    quanttodo.append((datFile, hdfFile, dataDir, os.path.dirname(os.path.abspath(__file__))))
+
+        available_threads = cfg.parameters['general']['thread_count']
+        # if user supplies more threads than available CPUs, reset
+        if available_threads > multiprocessing.cpu_count():
+            available_threads = multiprocessing.cpu_count()
+        my_threads = [jobQueue() for i in range(available_threads)]
+        print 'running with %i threads' % len(my_threads)
+        for thread in my_threads:
+            thread.add_job(MascotParse())
+            thread.setDaemon(True)
+            thread.start()
+
+        for thread in my_threads:
+            thread.join()
+
+        jobQueue.todoList.join()
+        if quanttodo:
+            for q in quanttodo:
+                jobQueue.todoList.put_nowait(q)
+            my_quant_threads = [jobQueue() for i in range(available_threads)]
+            for thread in my_quant_threads:
+                thread.add_job(MS1Quant())
+                thread.setDaemon(True)
+                thread.start()
+
+            for thread in my_quant_threads:
+                thread.join()
+
+            jobQueue.todoList.join()
+
+        for datFile in datList:
+            hdfFile = foundFiles[datFile]['.hdf5']
+            quantMeth = getQuantMethod(hdfFile)
             if cfg.parameters['runtime']['mergeresults']:
                 files2merge.append(hdfFile)
             else:
                 ret = runProteinInference([hdfFile])
                 if ret['code'] == 0:
-                    logger.log.info('Finished proteinInference successfully for %s' % hdfFile)
+                    logger.log.log(logger.PROCESS, 'Finished proteinInference successfully for %s' % hdfFile)
                 else:
                     logger.log.warning('proteinInference failed for %s: %s' % (hdfFile, ret['error']))
                     logger.log.warning('cmd: %s' % ret['cmdline'])
@@ -473,10 +615,11 @@ if __name__ == '__main__':
                 if quantMeth:
                     addIsotopeLabelTable(hdfFile, ret['resultfile'])
                     if ret['resultfile'].exists():
-                        ret = runProteinQuantification(ret['resultfile'], ret['suffix'])
+                        ret = runProteinQuantification(ret['resultfile'], ret['suffix'], doS2Icorrection)
 
                         if ret['code'] == 0:
-                            logger.log.info('Finished proteinQuantification successfully for %s' % hdfFile)
+                            logger.log.log(logger.PROCESS,
+                                           'Finished proteinQuantification successfully for %s' % hdfFile)
                         else:
                             logger.log.warning('proteinQuantification failed for %s: %s' % (hdfFile, ret['error']))
                             logger.log.warning('cmd: %s' % ret['cmdline'])
@@ -489,7 +632,7 @@ if __name__ == '__main__':
         if files2merge:
             ret = runProteinInference(files2merge)
             if ret['code'] == 0:
-                logger.log.info('Finished proteinInference successfully for %s' % ret['resultfile'])
+                logger.log.log(logger.PROCESS, 'Finished proteinInference successfully for %s' % ret['resultfile'])
             else:
                 logger.log.warning('proteinInference failed for %s: %s' % (ret['resultfile'], ret['error']))
                 logger.log.warning('cmd: %s' % ret['cmdline'])
@@ -498,9 +641,10 @@ if __name__ == '__main__':
             if quantMeth:
                 addIsotopeLabelTable(files2merge[0], ret['resultfile'])
                 if ret['resultfile'].exists():
-                    ret = runProteinQuantification(ret['resultfile'], ret['suffix'])
+                    ret = runProteinQuantification(ret['resultfile'], ret['suffix'], doS2Icorrection)
                     if ret['code'] == 0:
-                        logger.log.info('Finished proteinQuantification successfully for %s' % ret['resultfile'])
+                        logger.log.log(logger.PROCESS,
+                                       'Finished proteinQuantification successfully for %s' % ret['resultfile'])
                     else:
                         logger.log.warning('proteinQuantification failed for %s: %s' %
                                            (ret['resultfile'], ret['error']))

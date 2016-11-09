@@ -1,10 +1,10 @@
 """This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -18,11 +18,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 # python modules
 
 import sys
+import numpy as np
 sys.path.insert(0, '..')
 # commonUtils modules
 from CommonUtils.hdf5Base import hdf5Base
@@ -49,10 +50,13 @@ class HDFfile:
         # find the quant method
         isotopes = hdf.readTable('/rawdata/isotopes')
         if len(isotopes) > 0:
+            # initial assumption is that the quant data is in the /rawdata area
+            # hdf5Mascot will overwrite this if the data is quantified using MS1 data
             quantMethodID = isotopes[0]['method_id']
             qm = QuantMethods()
             self.quantMethod = qm.getMethodByID(quantMethodID)
             self.quantLoc = '/rawdata/quan'
+            self.quantExtraLoc = None
 
         else:
             self.quantMethod = None
@@ -85,8 +89,10 @@ class HDFfile:
 
             accession = row[0]
             mw = row[1]
-            description = row[2]
-            accession2proteininfo[accession] = (description, mw)
+            description = row[3]
+            gene_name = row[2]
+
+            accession2proteininfo[accession] = (description, mw, gene_name)
         self.hdf.close()
         return accession2proteininfo
 
@@ -136,14 +142,21 @@ class HDFfile:
 
     def readQuan(self):
         self.hdf.readOpen()
-        data = self.hdf.readTable(self.quantLoc)
+        if self.quantLoc:
+            data = self.hdf.readTable(self.quantLoc)
+        else:
+
+            data = np.array([])
         self.hdf.close()
 
         return data
 
     def readQuanExtra(self):
         self.hdf.readOpen()
-        data = self.hdf.readTable(self.quantExtraLoc)
+        if self.quantExtraLoc:
+            data = self.hdf.readTable(self.quantExtraLoc)
+        else:
+            data = np.array([])
         self.hdf.close()
 
         return data
@@ -291,6 +304,10 @@ class HDFfile:
 
     def readImporterData(self, usedPeps, hdf):
         # read the relevant query data
+        if self.quantMethod and self.quantMethod['source'] == 'ms1':
+            self.quantLoc = '/%s/quan' % self.importPath
+            self.quantExtraLoc = '/%s/quanextra' % self.importPath
+
         self.log.debug('reading HDF5 peptide data')
         peptides = self.getRelevantPeptides(usedPeps, hdf)
         self.log.debug('reading HDF5 query data')
@@ -299,9 +316,7 @@ class HDFfile:
         headerArray = self.readMSMSheader()
         self.log.debug('reading HDF5 quantification data')
 
-        if self.quantMethod:
-            quanArray = self.readQuan()
-        else:
-            quanArray = None
+        quanArray = self.readQuan()
+        quanExtra = self.readQuanExtra()
 
-        return peptides, queryDict, headerArray, quanArray
+        return peptides, queryDict, headerArray, quanArray, quanExtra

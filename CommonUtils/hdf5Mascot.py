@@ -1,11 +1,12 @@
+# -*- coding: utf-8 -*-
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -18,11 +19,13 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 
 """
 from hdf5Base import hdf5Base
 import datetime
+import unicodedata
+
 import ExceptionHandler as ExHa
 
 
@@ -112,25 +115,38 @@ class HDF5Mascot:
     def getPeptidefromMSMSID(self, msms_id, rank=None):
         hdf = self.hdf
         tablePath = '/%s/%s' % (self.importGroup, 'queries')
-        querydata = hdf.getDataGeneral(tablePath, "spec_id==%s" % msms_id)[0]
-        query = querydata['query']
+        queryData = hdf.getDataGeneral(tablePath, "spec_id==%s" % msms_id)[0]
+        query = queryData['query']
 
         tablePath = '/%s/%s' % (self.importGroup, 'peptides')
 
-        peptidedata = hdf.getDataGeneral(tablePath, "query==%s" % query)
+        peptideData = hdf.getDataGeneral(tablePath, "query==%s" % query)
         if rank:
-            peptidedata = [x for x in peptidedata if x[1] == rank]
+            peptideData = [x for x in peptideData if x[1] == rank]
 
-        return peptidedata[0]
+        if peptideData:
+            return peptideData[0]
+        else:
+            return []
 
     def getQueryno2msmsid(self):
         hdf = self.hdf
         tablePath = '/%s/%s' % (self.importGroup, 'queries')
-        returndict = {}
+        returndict = dict()
         for x in hdf.readTable(tablePath):
             query = x['query']
             spec_id = x['spec_id']
             returndict[query] = spec_id
+        return returndict
+
+    def getMsmsid2Queryno(self):
+        hdf = self.hdf
+        tablePath = '/%s/%s' % (self.importGroup, 'queries')
+        returndict = dict()
+        for x in hdf.readTable(tablePath):
+            query = x['query']
+            spec_id = x['spec_id']
+            returndict[spec_id] = query
         return returndict
 
     def deleteMascotImport(self, importGroup):
@@ -156,6 +172,8 @@ class HDF5Mascot:
             hdf.removeTable('/imports')
         self.numberImports -= 1
 
+        return
+
     def deleteAllMascotImports(self, isPreCal):
         """
         @brief deletes all mascot imports
@@ -171,8 +189,9 @@ class HDF5Mascot:
                 self.deleteMascotImport(imp['name'])
             if isPreCal == 1:
                 self.hdf.removeTable('/imports')
+        return
 
-    def createTables(self, importGroup, searchid, isPreCal):
+    def createTables(self, importGroup, isPreCal):
         """
         @brief creates all the required tables for the importing of Mascot data
         @param importGroup <string>: the group name to be created to hold the data
@@ -187,14 +206,12 @@ class HDF5Mascot:
         strTime = t.strftime('%Y-%m-%d %H:%M:%S')
         self.impRow = len(self.hdf.tableTOC['/imports'])
         hdf.appendRows('/imports', [dict(name=importGroup, date=strTime, datfile=self.datFileName, status='running')])
-        # hdf.appendRows('/imports', [dict(name=importGroup, date=strTime, datfile=self.datFileName, status='running',
-        #                                  numimports=1, searchid=searchid)])
 
         hdf.createGroup(importGroup)
         if self.importGroup != importGroup:
             self.importGroup = importGroup
         if isPreCal:
-            tables = [('masses', 'Mass'), ('mods', 'Mod'), ('calmasses', 'CalMasses')]
+            tables = [('parameters', 'Parameter'), ('masses', 'Mass'), ('mods', 'Mod'), ('calmasses', 'CalMasses')]
         else:
             tables = [('parameters', 'Parameter'), ('masses', 'Mass'), ('mods', 'Mod'), ('queries', 'Query'),
                       ('peptides', 'Peptide'), ('proteins', 'Protein'), ('seq2acc', 'Seq2Acc'), ('index', 'Index'),
@@ -222,8 +239,8 @@ class HDF5Mascot:
 
         return self.hdf.appendRows('/%s/parameters' % self.importGroup, write)
 
-    def writeConfig(self, configList):
-        return self.hdf.appendRows('/%s/config' % self.importGroup, configList)
+    def writeConfig(self, configList, table='config'):
+        return self.hdf.appendRows('/%s/%s' % (self.importGroup, table), configList)
 
     def getMSconfig(self, cfg):
         readSections = ('xic', 'deisotoping')
@@ -246,6 +263,8 @@ class HDF5Mascot:
                 cfg.parameters[rs].update(params)
 
         cfg.convertParameters()
+
+        return
 
     def getH5DFQuantMeth(self):
         isotopes = self.hdf.readTable('/rawdata/isotopes')
@@ -344,10 +363,9 @@ class HDF5Mascot:
         for mod in modifications:
             id += 1
             data = modifications[mod]
-            # compStr, compDict = self.calcComposition(data['da_delta']['elements'])
-            modDict = dict(modid=id, name=data['full_name'], title=data['title'],
-                           delta_mono_mass=data['delta']['mono_mass'], delta_avge_mass=data['delta']['avge_mass'],
-                           delta_comp=data['delta']['composition'])
+            name = unicodedata.normalize('NFKD', data['full_name']).encode('ascii', 'ignore')
+            modDict = dict(modid=id, name=name, title=data['title'], delta_comp=data['delta']['composition'],
+                           delta_mono_mass=data['delta']['mono_mass'], delta_avge_mass=data['delta']['avge_mass'])
             # modDict.update(elementDict)
             # modDict.update(compDict)
             # if 'Na' in modDict:
@@ -378,6 +396,8 @@ class HDF5Mascot:
         self.hdf.appendRows('/%s/unimodmodifications' % self.importGroup, writeMod, colsMod.keys())
         self.hdf.appendRows('/%s/unimodspecificity' % self.importGroup, writeSpec)
 
+        return
+
     def updateModsWithElements(self, uniMods):
         """
         @brief updates the mods table with the elemental composition from unimod
@@ -388,9 +408,11 @@ class HDF5Mascot:
         modsTable = self.hdf.tableTOC['/%s/mods' % self.importGroup]
 
         for trow in modsTable:
-            uMod = uniMods[trow['name']]
-            trow['composition'] = uMod['delta']['composition']
-
+            if trow['name'] in uniMods:
+                uMod = uniMods[trow['name']]
+                trow['composition'] = uMod['delta']['composition']
+            else:
+                raise ExHa.MascotModificationError('Modification "%s" not found in UniMod data' % trow['name'])
             trow.update()
 
     def calcComposition(self, elements):
@@ -441,7 +463,7 @@ class HDF5Mascot:
 
             if 'etMods' in pep.__dict__:
                 pepDict['etModName'] = pep.etMods['desc']
-                pepDict['etModDelta'] = pep.etMods['da_delta']
+                pepDict['etModDelta'] = pep.etMods['delta']
 
             write.append(pepDict)
 
@@ -464,7 +486,11 @@ class HDF5Mascot:
 
             # now loop through the protein accessions and add a line for each accession
             for acc in data['prots']:
-                protDict = dict(accession=acc['accession'], start=acc['start'], end=acc['end'])
+                hittype = 'FWD'
+                if acc['accession'].find('###REV###') >-1 or acc['accession'].find('###RND###') >-1 \
+                        or acc['accession'].startswith('DD'):
+                    hittype = 'REV'
+                protDict = dict(accession=acc['accession'], start=acc['start'], end=acc['end'], hittype=hittype)
                 protDict.update(pepDict)
                 write.append(protDict)
 
@@ -499,7 +525,7 @@ class HDF5Mascot:
             for fp in foundPeps:
                 spec = query2spec[fp['query']]
                 head = headers[spec2head[spec]]
-                peptideList.append(dict(query=fp['query'], rank=fp['pepno'], spec_id=spec, is_hook=fp['is_hook'],
+                peptideList.append(dict(query=fp['query'], rank=fp['pepno'], spec_id=spec, ishook=fp['is_hook'],
                                         score=fp['score'], fwhm=head['fwhm'], rt=head['rtapex']))
 
             peptides[pep['sequence']] = dict(hssHook=pep['hook'], hookScore=pep['hookscore'], pepScore=pep['pepscore'],
@@ -526,8 +552,7 @@ class HDF5Mascot:
 
             peptideList = []
             for fp in foundPeps:
-                peptideList.append(dict(query=fp['query'], rank=fp['pepno'], is_hook=fp['is_hook'],
-                                        score=fp['score']))
+                peptideList.append(dict(query=fp['query'], rank=fp['pepno'], ishook=fp['ishook'], score=fp['score']))
 
             peptides[pep['sequence']] = dict(hssHook=pep['hook'], hookScore=pep['hookscore'], pepScore=pep['pepscore'],
                                              bestRank=pep['bestczrank'], numPeps=pep['numpeps'], peptides=peptideList)
@@ -609,18 +634,13 @@ class HDF5Mascot:
         write = []
         for id in queries:
             data = queries[id]
-            queryDict = dict(query=id, msms_id=data['msmsid'], spec_id=int(data['msmsid'][1:]),
+            queryDict = dict(query=id, msms_id=data['msmsid'], spec_id=int(data['msmsid'][1:]), rt=data['rt'],
                              prec_neutmass=data['prec_neutmass'], prec_mz=data['prec_mz'],
                              prec_charge=data['prec_charge'], homology=data['homology'], matches=data['matches'],
                              numpeps=data['numpeps'], delta_seq=0.0, delta_mod=0.0)
-            if 'rt' in data:
-                queryDict['rt'] = data['rt']
-            else:
-                queryDict['rt'] = data['start']
             if data['numpeps'] > 0:
                 queryDict['delta_seq'] = data['delta_seq']
                 queryDict['delta_mod'] = data['delta_mod']
-
             write.append(queryDict)
 
         return self.hdf.appendRows('/%s/queries' % self.importGroup, write)
@@ -657,6 +677,8 @@ class HDF5Mascot:
         for index in indexes:
             self.hdf.indexTable(index[0], index[1])
 
+        return
+
     def readModDicts(self):
         """
         @brief returns all the modifications
@@ -667,14 +689,13 @@ class HDF5Mascot:
         variable = {}
         for d in data:
             if 'composition' in data.dtype.names:
-                # has composition column so calculate compostion from this
+                # has composition field so calculate compostion from this
                 elementsDict = self.compostition2dict(d['composition'])
             else:
-                # no compostition column so use individual element columns
                 elementsDict = {'C': d['C'], 'H': d['H'], 'N': d['N'], 'O': d['O'], 'P': d['P'],
                                 '13C': d['C13'], '2H': d['H2'], '15N': d['N15']}
 
-            mod = dict(name=d['name'], da_delta=d['da_delta'], amino=d['amino'], relevant=d['relevant'],
+            mod = dict(name=d['name'], delta=d['da_delta'], amino=d['amino'], relevant=d['relevant'],
                        nlmaster=d['nlmaster'], neutralloss=d['neutralloss'], elem=elementsDict)
 
             if d['modtype'] == 'fixed':
@@ -683,6 +704,19 @@ class HDF5Mascot:
                 variable[d['id']] = mod.copy()
 
         return variable, fixed
+
+    def readIsotopes(self):
+
+        data = self.hdf.readTable('/rawdata/isotopes')
+        isotopeList = []
+        for d in data:
+            isotope = {}
+            for c in d.dtype.names:
+                isotope[c] = d[c]
+
+            isotopeList.append(isotope.copy())
+
+        return isotopeList
 
     def compostition2dict(self, composition):
 

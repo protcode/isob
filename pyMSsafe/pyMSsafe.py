@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -18,7 +18,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 __version__ = "$Revision: 1.0 $"
@@ -33,6 +33,7 @@ import sys
 import socket
 import traceback
 from pathlib import Path
+import random
 
 # cellzome CommonUtils
 sys.path.insert(0, '..')
@@ -81,7 +82,7 @@ class pymssafe:
         @brief run the analysis
         @param job <object>: containing all the job data
         """
-        # needs to catch exceptions here so that LUX doesn't recieve an exception
+
 
         hdf = ''
         xraw = ''
@@ -99,7 +100,9 @@ class pymssafe:
             namebase = rawpath.stem
             hdfpath = jobObj.dstpth.absolute().joinpath(namebase + '.hdf5')
             runname = namebase
-            tempFile = jobObj.dstpth.absolute().joinpath(str(config.parameters['runtime']['pid']))
+            # tempFile = jobObj.dstpth.absolute().joinpath(str(config.parameters['runtime']['pid']))
+            rndName = str(int(random.random() * 1000000000))
+            tempFile = jobObj.dstpth.absolute().joinpath(Path(rndName))
             if tempFile.exists():
                 tempFile.unlink()
 
@@ -136,8 +139,8 @@ class pymssafe:
             # create datamanager object
             config.rawfile = jobObj.srcpth
             dataman = Datamanager(xraw, config, logs, hdf, quantMeth, str(tempFile))
+            dataman.rawFilePath = rawpath
             dataman.maxspec = maxspec
-            dataman.addLUXdata(jobObj, config.parameters['runtime']['pid'])
 
             # run the analysis in the datamanager
             ok = dataman.processSpectra(quantMeth, watch, runname)
@@ -207,7 +210,7 @@ class pymssafe:
                     break
             if quantMethod is None:
                 return None
-        elif cmdQuant is None:
+        elif cmdQuant == 'NONE':
             return None
         else:
             # use method in file
@@ -246,7 +249,8 @@ class pymssafe:
 
         tables = [('spectra', 'Spectra'), ('msmsheader', 'MSMSheader'), ('quan', 'Quan'), ('specparams', 'SpecParams'),
                   ('parameters', 'Parameters'), ('ions', 'Ions'), ('config', 'Config'), ('noise', 'Noise'),
-                  ('isotopes', 'IsotopeLabel'), ('units', 'Units'), ('xicbins', 'XICbins')]
+                  ('isotopes', 'IsotopeLabel'), ('units', 'Units'), ('xicbins', 'XICbins'),
+                  ('ms1summary', 'MS1summary'), ('ms2summary', 'MS2summary')]
         for t in tables:
             hdf.createTable('rawdata', t[0], t[1])
 
@@ -282,10 +286,11 @@ if __name__ == '__main__':
         if job.srcpth.suffix.lower() != '.raw':
             mssafe.logs.log.log(mssafe.logs.PROCESS, 'Not RAW file, skipping: %s' % job.srcpth.name)
             continue
-
+        mssafe.logs.log.name = mssafe.logs.log.name + ':' + job.srcpth.stem
         i += 1
         if len(files) > 1:
             mssafe.logs.log.info('jobid = %s (%i/%i)' % (str(job.job_id), i, len(files)))
+
         # ret = dict(code=1, error='forced error')
         try:
             ret = mssafe.run(job)

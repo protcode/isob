@@ -1,10 +1,10 @@
 """This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -19,7 +19,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here:
-https://github.com/cellzome/isobarquant
+https://github.com/protcode/isob
 """
 
 # !/usr/bin/env python
@@ -38,6 +38,7 @@ import CommonUtils.ExceptionHandler as ExHa
 from CommonUtils.LoggingManager import Logger
 from CommonUtils.hdf5Results import HDF5Results
 import CommonUtils.progressbar as progBar
+from CommonUtils.progressReport import progressReport
 
 
 class CorrectS2IQuantController:
@@ -52,11 +53,11 @@ class CorrectS2IQuantController:
         self.spectrumid2s2i = {}
         self.thisisotopecorrecteddata = {}
 
-    def getMS2Data(self):
+    def getQuantData(self):
         """@brief get ms2 data from hdf5 file, check whether needs to be isotope corrected or not (control) then
         pop it in a dictionary following isotope correction. Write back to HDF5 file if necessary
         """
-        rawquanref = self.hdf5corrects2iquant.getMS2Data()
+        rawquanref = self.hdf5corrects2iquant.getQuantData()
         rawquan = {}
         spectrumid2s2i = {}
 
@@ -110,14 +111,13 @@ class CorrectS2IQuantController:
         self.cfg.log.info('we have %s s2i records' % len(spectrum2s2i))
         mys2icorrecteddata = {}
 
-        pBar = progBar.ProgressBar(widgets=progBar.name_widgets, maxval=len(self.isotopecorrecteddata),
-                                   name='S2I correcting').start()
+        progRep = progressReport(len(self.isotopecorrecteddata), self.hdf5File.stem, 'S2I correcting', 'precursors')
 
         for spectrum_id, data in self.isotopecorrecteddata.iteritems():
             self.cfg.log.debug('spectrum id is %s' % spectrum_id)
             # perform correction only if there is actually an S2I value for that spectrum.
             if spectrum_id in spectrum2s2i:
-                pBar.nextPrimary()
+                progRep.next()
                 s2ivalue = round(spectrum2s2i[spectrum_id], 3)
                 self.cfg.log.debug('spectrum_id for s2i correction %s, s2i value %s ' % (spectrum_id, s2ivalue))
 
@@ -137,7 +137,8 @@ class CorrectS2IQuantController:
                     if spectrum_id not in mys2icorrecteddata:
                         mys2icorrecteddata[spectrum_id] = {}
                     mys2icorrecteddata[spectrum_id][isotopelabel_id] = val
-        pBar.finish()
+
+        progRep.endReport()
         self.s2icorrecteddata = mys2icorrecteddata
         self.cfg.log.info('done performS2Icorrection')
         return mys2icorrecteddata
@@ -177,7 +178,7 @@ if __name__ == "__main__":
             counter += 1
             s2iq.samplename = '0%s' % counter
             corrects2iquantoblist.append(s2iq)
-            isotopecorrecteddata = s2iq.getMS2Data()
+            isotopecorrecteddata = s2iq.getQuantData()
 
             sumionratiodict = s2iq.gets2icorrection(isotopecorrecteddata)
             for isotopelabel_id, data in sumionratiodict.iteritems():

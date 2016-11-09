@@ -1,10 +1,10 @@
 """This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -17,13 +17,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 # python modules
 import math
-import sys
-sys.path.insert(0, '..')
+
 # commonUtils modules
 from CommonUtils.MascotModificationsHandler import MascotModifications
 
@@ -42,8 +41,8 @@ class FileData:
         empty = dict(mean=0, sd=0, num=0, sum=0, sumsq=0)
         self.reporterStatistics = empty.copy()
         self.precursorStatistics = dict(ppm=empty.copy(), mass=empty.copy())
-        self.proteinNumbers = dict(forward_protein_hits={0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
-                                   reverse_protein_hits={0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0})
+        self.proteinNumbers = dict(target_protein_hits={0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+                                   decoy_protein_hits={0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0})
 
         self.acquired_spectra = 0
         self.mascot_matched_spectra = 0
@@ -112,8 +111,8 @@ class FileData:
         pn = self.proteinNumbers
 
         for i in range(6):
-            data['%i hooks forward_protein_hits' % i] = pn['forward_protein_hits'][i]
-            data['%i hooks reverse_protein_hits' % i] = pn['reverse_protein_hits'][i]
+            data['%i hooks target_protein_hits' % i] = pn['target_protein_hits'][i]
+            data['%i hooks decoy_protein_hits' % i] = pn['decoy_protein_hits'][i]
 
         data.update(self.getNumbersAccuracy())
         return data

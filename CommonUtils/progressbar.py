@@ -239,7 +239,7 @@ class ProgressBar(object):
     >>> pbar = ProgressBar().start()
     >>> for i in xrange(100):
     ...    # do something
-    ...    pbar.update(i+1)
+    ...    pbar.update(i + 1)
     ...
     >>> pbar.finish()
 
@@ -297,10 +297,6 @@ class ProgressBar(object):
         h, w = array('h', ioctl(self.fd, termios.TIOCGWINSZ, '\0' * 8))[:2]
         self.term_width = w
 
-    def percentage(self):
-        """Returns the percentage of the progress."""
-        return self.currval * 100.0 / self.maxval
-
     def windowsSize(self):
         from ctypes import windll, create_string_buffer
 
@@ -321,6 +317,10 @@ class ProgressBar(object):
         else:
             sizex, sizey = 0, 0
         return sizex, sizey
+
+    def percentage(self):
+        """Returns the percentage of the progress."""
+        return self.currval * 100.0 / self.maxval
 
     def _format_widgets(self):
         r = []
@@ -378,7 +378,7 @@ class ProgressBar(object):
         >>> pbar = ProgressBar().start()
         >>> for i in xrange(100):
         ...    # do something
-        ...    pbar.update(i+1)
+        ...    pbar.update(i + 1)
         ...
         >>> pbar.finish()
         """

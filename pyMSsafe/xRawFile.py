@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -19,11 +19,36 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
-
+import os
+import datetime
 import czXcalibur as czX
 import xcalparser as parser
+
+OLE_TIME_ZERO = datetime.datetime(1899, 12, 30, 0, 0, 0)
+
+
+class MSinstrument:
+    orbitrap = 0
+    exactive = 1
+    fusion = 2
+
+    def __init__(self, instrument):
+        self.instrument = instrument.lower()
+        self.value = getattr(self, self.instrument)
+
+    def __repr__(self):
+        return self.instrument
+
+    def isOrbitrap(self):
+        return self.value == self.orbitrap
+
+    def isExactive(self):
+        return self.value == self.exactive
+
+    def isFusion(self):
+        return self.value == self.fusion
 
 
 class XRawFile(czX.XRawFile):
@@ -43,6 +68,15 @@ class XRawFile(czX.XRawFile):
         self.__cache_numSpectra = None
         self.isExactive = 0
         self.skipScanEvents = []
+
+        methodNames = self.getInstMethodNames()
+
+        if 'Thermo Exactive' in methodNames:
+            self.instrument = MSinstrument('exactive')
+        elif 'TNG-Calcium' in methodNames:
+            self.instrument = MSinstrument('fusion')
+        else:
+            self.instrument = MSinstrument('orbitrap')
 
     def close(self):
         """
@@ -81,6 +115,22 @@ class XRawFile(czX.XRawFile):
         """
         return [self.getFilterForScanNum(scanNum) for scanNum in self.scanNums]
 
+    allFilters = property(getAllFilters)
+
+    def getCreationDate(self):
+        """
+        @Brief Return creation date of raw file
+        @Return datetime object
+        """
+        d = czX.XRawFile.getCreationDate(self)
+        # 'd' is a floating point number denoting day (the integer) part since
+        # 1899-12-30, and the fraction part is the number of seconds of the day.
+        # This is the VC++ or OLE 'DATE' format.
+        # Requires special conversion. Source:
+        # http://code.activestate.com/recipes/496683-converting-ole-datetime-values-into-python-datetim/
+        return OLE_TIME_ZERO + datetime.timedelta(days=d)
+    creationDate = property(getCreationDate)
+
     # ##################### GavSwe additions
 
     def genSpecNum(self):
@@ -96,7 +146,21 @@ class XRawFile(czX.XRawFile):
         @param scanNum <integer>: spectrum number
         @return spec <list>: list of tuples containing (mz <float>, intensity <float>)
         """
+
         return self.getMassListFromScanNum(scanNum)
+
+    def getStatusLog(self, scanNum):
+        """
+        @brief fetches the spectrum ion data
+        @param scanNum <integer>: spectrum number
+        @return spec <list>: list of tuples containing (mz <float>, intensity <float>)
+        """
+
+        statusLog = self.getStatusLogForScanNum(scanNum)
+
+        parsed = parser.parseParameterList(statusLog)
+
+        return
 
     def getSpectrumHeader(self, scanNum):
         """
@@ -104,11 +168,21 @@ class XRawFile(czX.XRawFile):
         @param scanNum <integer>: spectrum number
         @return params <dictionary>: dictionary of all the parameters with their values.
         """
+
+        headerDict = self.getScanHeaderInfo(scanNum)
+
         params = dict(extra=parser.parseParameterList(self.getTrailerExtraForScanNum(scanNum)),
-                      rt=self.getRTFromScanNum(scanNum),
+                      rt=self.getRTFromScanNum(scanNum), tic=headerDict['tic'],
+                      basepeak_mass=headerDict['basepeak_mass'], basepeak_inten=headerDict['basepeak_inten'],
                       filter=parser.parseFilter(self.getFilterForScanNum(scanNum))
                       )
         return params
+
+    def getScanHeaderInfo(self, scanNum):
+        h = self.getScanHeaderInfoForScanNum(scanNum)
+        headerDict = dict(num_packets=h[0], start_time=h[1], low_mass=h[2], high_mass=h[3], tic=h[4],
+                          basepeak_mass=h[5], basepeak_inten=h[6], num_channels=h[7], uniform_time=h[8], frequency=h[9])
+        return headerDict
 
     #    def getLCMethods(self, anal, load, dionex, pumps):
     def getLCMethods(self, methodsDic):
@@ -143,18 +217,20 @@ class XRawFile(czX.XRawFile):
         ms_param = {}
         order = []
         meths = self.getInstMethodNames()
-        if 'Thermo Exactive' in meths:
-            self.isExactive = 1
+
         for j in range(len(meths)):
             if meths[j] in meth:
-                if self.isExactive:
+                if self.instrument.isExactive():
                     # parsing for the Q Exactive
                     ms_param, order = parser.parseQExative(self.getInstMethod(j))
+                elif self.instrument.isFusion():
+                    # parsing for the Q Exactive
+                    ms_param, order = parser.parseFusion(self.getInstMethod(j))
                 else:
                     # parsing for the LTQ Orbitraps
                     ms_param, order = parser.parseLTQ(self.getInstMethod(j), self.skipScanEvents)
 
-        if not self.isExactive:
+        if self.instrument.isOrbitrap():
             # find the mass range of the MS unit (Scan Event 1)
             if ms_param['Scan Event 1']['group'] == 'MS event':
                 txt = ms_param['Scan Event 1']['Type']

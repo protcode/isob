@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -19,7 +19,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 import sys
@@ -42,22 +42,22 @@ rx_protein = re.compile('"(?P<key>.+)"=(?P<value>.*)')
 
 class DatParser:
     def __init__(self, datfile, cfg, logs):
-        '''
+        """
         __init__()
 
         initialises class and creates links to the logger and dat file oject
-        '''
+        """
         self.datfileobj = datfile
         self.cfg = cfg
         self.logs = logs
         self.sectionsNeeded = {}
 
     def startParsing(self):
-        '''
+        """
         startParsing(string) -> integer
 
         Parses the dat file given by datfilepath.
-        '''
+        """
         datPath = str(self.datfileobj.filedic['datpath'])
         self.logs.datlog.info('Starting parsing file %s' % datPath)
         fin = open(datPath, 'r')
@@ -83,6 +83,7 @@ class DatParser:
                     'proteins':       self.doProteins(fin, self.datfileobj),
                     'query':          self.doQuery(fin, self.datfileobj),
                     'postquery':      self.doSkip(fin, self.datfileobj),
+                    'taxonomy':       self.doSkip(fin, self.datfileobj),
                     'index':          self.doIndex(fin, self.datfileobj),
                     'quantitation':   self.doSkip(fin, self.datfileobj),
                     'boundary':       self.doBoundary(fin, self.datfileobj)}
@@ -102,20 +103,22 @@ class DatParser:
         except StopIteration:
             self.doPostParsing(self.datfileobj)
             self.logs.datlog.info('Parsing complete')
+        except:
+            raise
         fin.close()
 
     def isBoundary(self, text):
-        '''
+        """
         @brief checks for the boundary condition (always preceeded by comment marks)
-        '''
+        """
         return text[:2] == '--'
 
     def doSkip(self, fileiterator, datfile):
-        '''
+        """
         @brief reads through the file until the next boundry
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         isbound = self.isBoundary
 
         while 1:
@@ -125,11 +128,11 @@ class DatParser:
             yield ('boundary', self.cargo)
 
     def doParameters(self, fileiterator, datfile):
-        '''
+        """
         @brief reads the parameters section and puts the data into a dictionary, data is passed to the datfile object
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         try:
             isbound = self.isBoundary
 
@@ -150,11 +153,11 @@ class DatParser:
             raise
 
     def doMasses(self, fileiterator, datfile):
-        '''
+        """
         @brief reads the masses section and puts the data into a dictionary, data is passed to the datfile object
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
 
         try:
             isbound = self.isBoundary
@@ -175,11 +178,11 @@ class DatParser:
             raise
 
     def doUnimod(self, fileiterator, datfile):
-        '''
+        """
         @brief reads the masses section and puts the data into a dictionary, data is passed to the datfile object
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
 
         try:
             isbound = self.isBoundary
@@ -199,11 +202,11 @@ class DatParser:
             raise
 
     def doEnzyme(self, fileiterator, datfile):
-        '''
+        """
         @brief reads the enzyme section and puts the data into a dictionary, data is passed to the datfile object
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         try:
             isbound = self.isBoundary
 
@@ -226,11 +229,11 @@ class DatParser:
             raise
 
     def doHeader(self, fileiterator, datfile):
-        '''
+        """
         @brief reads the header section and puts the data into a dictionary, data is passed to the datfile object
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         try:
             isbound = self.isBoundary
             self.logs.datlog.info('Loading and Parsing header')
@@ -250,11 +253,11 @@ class DatParser:
             raise
 
     def doSummary(self, fileiterator, datfile):
-        '''
+        """
         @brief reads the summary section and puts the data into a dictionary, data is passed to the datfile object
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         try:
             isbound = self.isBoundary
 
@@ -276,11 +279,11 @@ class DatParser:
             raise
 
     def doETsummary(self, fileiterator, datfile):
-        '''
+        """
         @brief reads the summary section and puts the data into a dictionary, data is passed to the datfile object
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         try:
             isbound = self.isBoundary
 
@@ -302,11 +305,11 @@ class DatParser:
             raise
 
     def doPeptides(self, fileiterator, datfile):
-        '''
+        """
         @brief reads the peptide section and puts the data into a dictionary, data is passed to the datfile object
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         key = 'None'
         try:
             isbound = self.isBoundary
@@ -346,11 +349,11 @@ class DatParser:
             raise
 
     def doETpeptides(self, fileiterator, datfile):
-        '''
+        """
         @brief reads the peptide section and puts the data into a dictionary, data is passed to the datfile object
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         key = 'None'
         try:
             isbound = self.isBoundary
@@ -392,11 +395,11 @@ class DatParser:
             raise
 
     def doPostPeptides(self, fileiterator, datfile):
-        '''
+        """
         @brief processes the global peptide data
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         while 1:
             self.logs.datlog.info('%d peptides processed' % datfile.peptidecounter)
             self.logs.datlog.info('%d failed peptides' % datfile.failedsequences)
@@ -404,11 +407,11 @@ class DatParser:
             yield ('boundary', self.cargo)
 
     def doProteins(self, fileiterator, datfile):
-        '''
+        """
         @brief reads the protein section and puts the data into a dictionary, data is passed to the datfile object
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         try:
             isbound = self.isBoundary
             self.logs.datlog.info('Loading and Parsing proteins')
@@ -429,11 +432,11 @@ class DatParser:
             raise
 
     def doQuery(self, fileiterator, datfile):
-        '''
+        """
         @brief reads the query sections and puts the data into a dictionary, data is passed to the datfile object
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         query = 'None'
         try:
             isbound = self.isBoundary
@@ -459,11 +462,11 @@ class DatParser:
             raise
 
     def doPostQuery(self, fileiterator, datfile):
-        '''
+        """
         @brief perfoms tasks after all the query data is loaded
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         try:
             datfile.doPostQuery()
             while 1:
@@ -476,11 +479,11 @@ class DatParser:
             raise
 
     def doIndex(self, fileiterator, datfile):
-        '''
+        """
         @brief parses index section of the dat file
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         try:
             isbound = self.isBoundary
 
@@ -503,11 +506,11 @@ class DatParser:
             raise
 
     def doBoundary(self, fileiterator, datfile):
-        '''
+        """
         @brief reads fileiterator until it finds a boundry
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         while 1:
             while not rx_sectionh.search(self.cargo):
                 self.cargo = fileiterator.next()
@@ -519,22 +522,22 @@ class DatParser:
             yield (sectionname, self.cargo)
 
     def doPostParsing(self, datfile):
-        '''
+        """
         @brief parses index section of the dat file
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         datfile.doPostParsing()
 
 
 class DatParserPreCal(DatParser):
 
     def startParsing(self):
-        '''
+        """
         startParsing(string) -> integer
 
         Parses the dat file given by datfilepath.
-        '''
+        """
         datPath = str(self.datfileobj.filedic['datpath'])
         self.logs.datlog.info('Starting parsing file %s' % datPath)
         fin = open(datPath, 'r')
@@ -573,11 +576,11 @@ class DatParserPreCal(DatParser):
         fin.close()
 
     def doPeptides(self, fileiterator, datfile):
-        '''
+        """
         @brief reads the peptide section and puts the data into a dictionary, data is passed to the datfile object
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         key = 'None'
         try:
             isbound = self.isBoundary
@@ -617,11 +620,11 @@ class DatParserPreCal(DatParser):
             raise
 
     def doQuery(self, fileiterator, datfile):
-        '''
+        """
         @brief reads the query sections and puts the data into a dictionary, data is passed to the datfile object
         @param fileiterator <file object>: linked to the dat file
         @param datfile <datfile object>: containing all the dat file data and processing methods
-        '''
+        """
         query = 'None'
         try:
             isbound = self.isBoundary

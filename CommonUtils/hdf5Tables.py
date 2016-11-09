@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -20,7 +20,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 import tables as tables
@@ -39,9 +39,48 @@ Spectra_attr = ['COL spec_id: Spectrum identifier, corresponds to the Xcalibur s
                 'COL type: Type of spectrum MS1, MS2 or MS3.']
 
 
+class MS1summary(tables.IsDescription):
+    """
+    @brief HDF5 table definition for Spectra table
+    """
+    spec_id = tables.Int32Col(pos=0)
+    tic = tables.Float64Col(pos=1)
+    sumions = tables.Float64Col(pos=2)
+    numms2 = tables.Int32Col(pos=3)
+    basepeak_mass = tables.Float64Col(pos=4)
+    basepeak_inten = tables.Float64Col(pos=5)
+
+MS1summary_attr = ['COL spec_id: Spectrum identifier, corresponds to the Xcalibur spectrum number.',
+                   'COL tic: The Xcalibur calculated TIC for the spectrum.',
+                   'COL sumions: pyMSsafe TIC - calculated buy summing all ion intensities recorded in the xicbins ' +
+                   'table for this spectrum.',
+                   'COL numms2: The number of MS2 spectra derived from this MS1 spectrum.',
+                   'COL basepeak_mass: The mass of the spectrum base peak (most intense ion in the spectrum).',
+                   'COL basepeak_inten: The intensity of the spectrum base peak (most intense ion in the spectrum).']
+
+
+class MS2summary(tables.IsDescription):
+    """
+    @brief HDF5 table definition for Spectra table
+    """
+    spec_id = tables.Int32Col(pos=0)
+    tic = tables.Float64Col(pos=1)
+    sumions = tables.Float64Col(pos=2)
+    sumrepions = tables.Float64Col(pos=3)
+    sumfragions = tables.Float64Col(pos=4)
+
+MS2summary_attr = ['COL spec_id: Spectrum identifier, corresponds to the Xcalibur spectrum number.',
+                   'COL tic: The Xcalibur calculated TIC for the spectrum.',
+                   'COL sumions: pyMSsafe TIC - calculated buy summing all ion intensities recorded in the ions ' +
+                   'table for this spectrum.',
+                   'COL sumrepions: pyMSsafe TIC - calculated buy summing all teh reporter ion intensities recorded ' +
+                   'in the quan table for this spectrum.',
+                   'COL sumfragions: pyMSsafe TIC - calculated as the difference between sumions and sumrepions.']
+
+
 class MSMSheader(tables.IsDescription):
     """
-    @brief HDF5 table definition for MSMSjeader table: Holds all data for MS/MS events
+    @brief HDF5 table definition for MSMSheader table: Holds all data for MS/MS events
     """
     spec_id = tables.Int32Col(pos=0)
     unit_id = tables.Int32Col(pos=1)
@@ -84,44 +123,64 @@ class MSMSheader(tables.IsDescription):
     integ = tables.Float32Col(pos=38)
 
 MSMSheader_attr = ['COL spec_id: Spectrum identifier; corresponds to the Xcalibur spectrum number.',
-                   'COL unit_id: Unit identifier: The unit groups spectra from the same precursor so that they can be processed together.',
+                   ('COL unit_id: Unit identifier: The unit groups spectra from the same precursor so that they ' +
+                    'can be processed together.'),
                    'COL order: Order in which the spectra in a unit were acquired.',
                    'COL scanevent: The event number assigned by Xcalibur.',
-                   'COL precmz: The m/z for the precursor ion using XIC derived data if possible.  If recalibration has been performed this is the recalibrated m/z',
+                   ('COL precmz: The m/z for the precursor ion using XIC derived data if possible.  If recalibration ' +
+                    'has been performed this is the recalibrated m/z'),
                    'COL precmzraw: The m/z for the precursor ion using XIC derived data if possible.',
-                   'COL precinten: The intensity value for the precursor ion. This will be the apex intensity of the XIC data where possible or the interpolated intensity of the precursor ion at the time of the MS/MS event.',
-                   'COL peaktype: The source of the precursor ion data. Is One of XICclust - XIC data with full cluster matching, XICsingle - XIC data with only 12C ion matching, survey - interpolated data from MS1 spectra.',
+                   ('COL precinten: The intensity value for the precursor ion. This will be the apex intensity of ' +
+                    'the XIC data where possible or the interpolated intensity of the precursor ion at the time ' +
+                    'of the MS/MS event.'),
+                   ('COL peaktype: The source of the precursor ion data. Is One of XICclust - XIC data with full ' +
+                    'cluster matching, XICsingle - XIC data with only 12C ion matching, survey - interpolated data ' +
+                    'from MS1 spectra.'),
                    'COL monomz: The Xcalibur monoisotopicMZ value - a m/z value for the precursor ion.',
-                   'COL precmz_xic: The m/z for the precursor ion derived from XIC data.  Intensity weighted mean of the XIC data points with intensity > half the maximum intensity.',
+                   ('COL precmz_xic: The m/z for the precursor ion derived from XIC data.  Intensity weighted mean ' +
+                    'of the XIC data points with intensity > half the maximum intensity.'),
                    'COL precmz_surv:  The m/z for the precursor ion derived from MS1 spectra data.',
                    'COL rt: The retention time of the spectrum.',
                    'COL rtapex: The retention time of the matching XIC peak apex.',
                    'COL scanapex: The spectrum number for the XIC peak apex.',
                    'COL charge: The charge state of the precursor ion.',
                    'COL precsd: The standard deviation of the data point used to calculate the precmz_xic.',
-                   'COL id_spec: The spec_id of the spectrum where the sequence data is located.  When units have multiple spectra one can contain the sequence information and the other the quantification data.',
-                   'COL quan_spec: The spec_id of the spectrum where the quantification data is located.  When units have multiple spectra one can contain the sequence information and the other the quantification data.',
+                   ('COL id_spec: The spec_id of the spectrum where the sequence data is located.  When units have ' +
+                    'multiple spectra one can contain the sequence information and the other the quantification data.'),
+                   ('COL quan_spec: The spec_id of the spectrum where the quantification data is located.  When ' +
+                    'units have multiple spectra one can contain the sequence information and the other the ' +
+                    'quantification data.'),
                    'COL survey_spec: Spectrum identifier for the MS1 spectrum prior to the MS/MS event.',
                    'COL inten: The apex ion intensity of any linked XIC peak.',
                    'COL area: The maximum ion area of any linked XIC peak.',
                    'COL setmass: The m/z set by Xcalibur as the center of the isolation window.',
                    'COL fwhm: The width of the XIC peak at half maximum intensity.',
                    'COL c13iso: The number of 13C isotopes identified in the isolation window.',
-                   'COL s2i: The S2I value for the MS/MS event, this is interpolated from the two flanking MS1 spectra.',
-                   'COL s2iearly: The S2I value for the precursor ion measured in the MS1 event prior to the MS/MS event.',
-                   'COL s2ilate: The S2I value for the precursor ion measured in the MS1 event after to the MS/MS event.',
-                   'COL c12: The intensity of the precursor 12C ion, this is interpolated from the two flanking MS1 spectra.',
-                   'COL c12early: The 12C intensity value for the precursor ion measured in the MS1 event prior to the MS/MS event.',
-                   'COL c12late: The 12C intensity value for the precursor ion measured in the MS1 event after to the MS/MS event.',
-                   'COL thresh: The Xcalibur intensity cut off (best estimation of noise) level for the MS/MS event, this is interpolated from the two flanking MS1 spectra.',
-                   'COL threshearly: The Xcalibur intensity cut off for the precursor ion measured in the MS1 event prior to the MS/MS event.',
-                   'COL threshlate: The Xcalibur intensity cut off for the precursor ion measured in the MS1 event after to the MS/MS event.',
+                   ('COL s2i: The S2I value for the MS/MS event, this is interpolated from the two flanking MS1 ' +
+                    'spectra.'),
+                   ('COL s2iearly: The S2I value for the precursor ion measured in the MS1 event prior to the ' +
+                    'MS/MS event.'),
+                   ('COL s2ilate: The S2I value for the precursor ion measured in the MS1 event after to the ' +
+                    'MS/MS event.'),
+                   ('COL c12: The intensity of the precursor 12C ion, this is interpolated from the two flanking ' +
+                    'MS1 spectra.'),
+                   ('COL c12early: The 12C intensity value for the precursor ion measured in the MS1 event prior ' +
+                    'to the MS/MS event.'),
+                   ('COL c12late: The 12C intensity value for the precursor ion measured in the MS1 event after ' +
+                    'to the MS/MS event.'),
+                   ('COL thresh: The Xcalibur intensity cut off (best estimation of noise) level for the MS/MS ' +
+                    'event, this is interpolated from the two flanking MS1 spectra.'),
+                   ('COL threshearly: The Xcalibur intensity cut off for the precursor ion measured in the MS1 ' +
+                    'event prior to the MS/MS event.'),
+                   ('COL threshlate: The Xcalibur intensity cut off for the precursor ion measured in the MS1 ' +
+                    'event after to the MS/MS event.'),
                    'COL fragmeth: The fragmentation method used in this MS/MS event.',
                    'COL fragenergy: The energy used for fragmentation for this MS/MS event.',
                    'COL sumrepint: Sum of the intensities of all identified reporter ions.',
                    'COL sumreparea: Sum of the areas of all identified reporter ions.',
                    'COL smooth: The maximum smoothed intensity for the XIC peak.',
-                   'COL integ: The integrated ion intensity for ions with intensities > half the maximum intensity the XIC peak.']
+                   ('COL integ: The integrated ion intensity for ions with intensities > half the maximum ' +
+                    'intensity the XIC peak.')]
 
 
 class SpecParams(tables.IsDescription):
@@ -395,7 +454,8 @@ class IsotopeLabel(tables.IsDescription):
 
 IsotopeLabel_attr = ['COL iso_id: The isotope labels id, should be unique amongst all methods.',
                      'COL name: The name for the individual isotope.',
-                     'COL mz: The reporter ion m/z for the label for MS2 quantification, and the mass delta for MS1 quantification.',
+                     ('COL mz: The reporter ion m/z for the label for MS2 quantification, and the mass delta ' +
+                      'for MS1 quantification.'),
                      'COL intmz: The mz rounded to the nearest integer.',
                      'COL error: The absolute m/z error to be applied to this label.',
                      'COL method_id: The unique identifer for the quantification method that this label is part of.',
@@ -408,29 +468,35 @@ class Units(tables.IsDescription):
     """
     unit = tables.Int32Col(pos=0)
     order = tables.Int32Col(pos=1)
-    activation = tables.StringCol(8, pos=2)
-    acttime = tables.Float32Col(pos=3)
-    energy = tables.Float32Col(pos=4)
-    isolation = tables.Float32Col(pos=5)
-    lowmz = tables.Float32Col(pos=6)
-    resolution = tables.Int32Col(pos=7)
-    use = tables.StringCol(5, pos=8)
-    scanevents = tables.StringCol(100, pos=9)
-    colenergysteps = tables.Int32Col(pos=10)
-    colenergywidth = tables.Float32Col(pos=11)
+    ms_level = tables.Int32Col(pos=2)
+    activation = tables.StringCol(8, pos=3)
+    detector = tables.StringCol(8, pos=4)
+    acttime = tables.Float64Col(pos=5)
+    energy = tables.Float64Col(pos=6)
+    isolation = tables.Float64Col(pos=7)
+    lowmz = tables.Float64Col(pos=8)
+    resolution = tables.Int32Col(pos=9)
+    use = tables.StringCol(5, pos=10)
+    scanevents = tables.StringCol(100, pos=11)
+    colenergysteps = tables.Int32Col(pos=12)
+    colenergywidth = tables.Float64Col(pos=13)
 
 Units_attr = ['COL unit: The ID of the unit.',
               'COL order: The order number of the unit MS/MS event.',
+              'COL ms_level: The depth of MSn events, i.e. MS/MS = 2 MS/MS/MS = 3.',
               'COL activation: The fragmentation method used.',
+              'COL detector: The MS analyser used to measure the spectrum.',
               'COL acttime: The time allowed for collisions.',
               'COL energy: The energy used in the fragmentation.',
               'COL isolation: The isolation window setting.',
               'COL lowmz: Lowest m/z for the MS/MS event.',
               'COL resolution: Operating resolution of the instrument.',
-              'COL use: How the spectrum data should be used I = identification only, Q = quantification only & IQ = quantification and identification.',
+              ('COL use: How the spectrum data should be used I = identification only, Q = quantification only & ' +
+               'IQ = quantification and identification.'),
               'COL scanevents: The scan events from Xcalibur method linked to this .',
               'COL colenergysteps: The steps in collision energy if this option is being used.',
-              'COL colenergywidth: Type range of collision energies used if multiple collision energies are being used.']
+              ('COL colenergywidth: Type range of collision energies used if multiple collision energies are ' +
+               'being used.')]
 
 
 class Imports(tables.IsDescription):
@@ -477,7 +543,7 @@ class Mod(tables.IsDescription):
     @brief HDF5 table definition for mascot modifications table
     """
     id = tables.StringCol(1, pos=0)
-    name = tables.StringCol(50, pos=1)
+    name = tables.StringCol(60, pos=1)
     modtype = tables.StringCol(10, pos=2)
     da_delta = tables.Float32Col(pos=3)
     amino = tables.StringCol(20, pos=4)
@@ -486,7 +552,8 @@ class Mod(tables.IsDescription):
     relevant = tables.Int32Col(pos=7)
     composition = tables.StringCol(100, pos=8)
 
-Mod_attr = ['COL id: Mascots identifier for the modification.  This is a number for variable modifications and an amino acid code for fixed modifications.',
+Mod_attr = [('COL id: Mascots identifier for the modification.  This is a number for variable modifications ' +
+             'and an amino acid code for fixed modifications.'),
             'COL name: The name of the modification.',
             'COL modtype: Whether the modification is fixed or variable.',
             'COL da_delta: The mass difference that the modification makes.',
@@ -523,9 +590,13 @@ Query_attr = ['COL query: The mascot assigned spectrum identifier.',
               'COL prec_charge: The precursor charge state.',
               'COL matches: Number of peptides found by Mascot within the mass accuracy of the precursor.',
               'COL homology: The Mascot score required for a homology match.',
-              'COL numpeps: A count of the number of peptides with valid sequences returned by Mascot for this spectrum.',
-              'COL delta_seq: Difference in Mascot scores between the top Mascot sequence match and the next highest scoring sequence match. If delta_seq equals zero or if it is above the delta_seq_threshold its quant values may be used for protein quantification.',
-              'COL delta_mod: Difference in Mascot scores between the best two modification variants of this sequence. See paper 21057138.']
+              ('COL numpeps: A count of the number of peptides with valid sequences returned by Mascot for this ' +
+               'spectrum.'),
+              ('COL delta_seq: Difference in Mascot scores between the top Mascot sequence match and the next ' +
+               'highest scoring sequence match. If delta_seq equals zero or if it is above the delta_seq_threshold ' +
+               'its quant values may be used for protein quantification.'),
+              ('COL delta_mod: Difference in Mascot scores between the best two modification variants of this ' +
+               'sequence. See paper 21057138.')]
 
 
 class Peptide(tables.IsDescription):
@@ -554,12 +625,16 @@ Peptide_attr = ['COL query: The Mascot assigned spectrum identifier.',
                 "COL sequence: Peptide's amino acid sequence.",
                 'COL is_hook: Equals 1 if this is a hook peptide.',
                 'COL useinprot: Equals 1 if the peptide is suitable to use in protein inference.',
-                'COL modsVariable: Description of the Mascot identified variable modifications . e.g. 2 Oxidation (M); 1 TMT6plex (N-term).',
-                'COL modsFixed: Description of the Mascot identified fixed modifications .  e.g. 1 Carbamidomethyl (C); 1 TMT6plex (K).',
+                ('COL modsVariable: Description of the Mascot identified variable modifications . ' +
+                 'e.g. 2 Oxidation (M); 1 TMT6plex (N-term).'),
+                ('COL modsFixed: Description of the Mascot identified fixed modifications .  ' +
+                 'e.g. 1 Carbamidomethyl (C); 1 TMT6plex (K).'),
                 'COL mass: Calculated molecular mass of the peptide sequence.',
-                'COL da_delta: Mass difference between the sequence mass (mw) and the neutral_mass in Da. Corresponds to Mascot delta.',
+                ('COL da_delta: Mass difference between the sequence mass (mw) and the neutral_mass in Da. ' +
+                 'Corresponds to Mascot delta.'),
                 'COL score: The Mascot score.',
-                'COL misscleave: Number of sites on the peptide sequence where expected cleavage by the protease failed to occur.',
+                ('COL misscleave: Number of sites on the peptide sequence where expected cleavage by the ' +
+                 'protease failed to occur.'),
                 'COL numionsmatched: The the number of ions from the sequence that match the spectrum data.',
                 'COL seriesfound: Mascot seriesfound parameter.',
                 'COL peaks1: Mascot peaks1 parameter.',
@@ -595,14 +670,16 @@ ETpeptide_attr = ['COL query: SThe mascot assigned spectrum identifier.',
                   "COL sequence: Peptide's amino acid sequence.",
                   'COL is_hook: Equals 1 if this is a hook peptide.',
                   'COL useinprot: Equals 1 if the peptide is suitable to use in protein inference.',
-                  'COL modsVariable: Description of the Mascot identified variable modifications . e.g. 2 Oxidation (M); 1 TMT6plex (N-term).',
-                  'COL modsFixed: Description of the Mascot identified fixed modifications .  e.g. 1 Carbamidomethyl (C); 1 TMT6plex (K).',
-                  'COL etModName: Name of error tollerant modification.',
-                  'COL etModDelta: Mass difference of error tollerant modification).',
+                  ('COL modsVariable: Description of the Mascot identified variable modifications . ' +
+                   'e.g. 2 Oxidation (M); 1 TMT6plex (N-term).'),
+                  ('COL modsFixed: Description of the Mascot identified fixed modifications .  ' +
+                   'e.g. 1 Carbamidomethyl (C); 1 TMT6plex (K).'),
                   'COL mass: Calculated molecular mass of the peptide sequence.',
-                  'COL da_delta: Mass difference between the sequence mass (mw) and the neutral_mass in Da. Corresponds to Mascot delta.',
+                  ('COL da_delta: Mass difference between the sequence mass (mw) and the neutral_mass in Da. ' +
+                   'Corresponds to Mascot delta.'),
                   'COL score: The Mascot score.',
-                  'COL misscleave: Number of sites on the peptide sequence where expected cleavage by the protease failed to occur.',
+                  ('COL misscleave: Number of sites on the peptide sequence where expected cleavage by the ' +
+                   'protease failed to occur.'),
                   'COL numionsmatched: The the number of ions from the sequence that match the spectrum data.',
                   'COL seriesfound: Mascot seriesfound parameter.',
                   'COL peaks1: Mascot peaks1 parameter.',
@@ -614,13 +691,15 @@ class Protein(tables.IsDescription):
     """
     @brief HDF5 table definition for mascot modifications table
     """
-    accession = tables.StringCol(255, pos=0)
+    accession = tables.StringCol(100, pos=0)
     mass = tables.Float32Col(pos=1)
     name = tables.StringCol(255, pos=2)
+    gene_name = tables.StringCol(150, pos=2)
 
 Protein_attr = ['COL accession: The protein identifier used by Mascot.',
                 'COL mass: The mass of the protein sequence.',
-                'COL name: The name of the protein.']
+                'COL name: The name of the protein.',
+                'COL gene_name: The Uniprot Gene Name parsed out if present.']
 
 
 class Seq2Acc(tables.IsDescription):
@@ -628,7 +707,7 @@ class Seq2Acc(tables.IsDescription):
     @brief HDF5 table definition for links between peptide sequences and protein accessions
     """
     sequence = tables.StringCol(255, pos=0)
-    accession = tables.StringCol(255, pos=1)
+    accession = tables.StringCol(100, pos=1)
     hook = tables.Int32Col(pos=2)
     hookscore = tables.Float32Col(pos=3)
     pepscore = tables.Float32Col(pos=4)
@@ -636,6 +715,7 @@ class Seq2Acc(tables.IsDescription):
     numpeps = tables.Int32Col(pos=6)
     start = tables.Int32Col(pos=7)
     end = tables.Int32Col(pos=8)
+    hittype = tables.StringCol(5, pos=9)
 
 Seq2Acc_attr = ['COL sequence: The peptide amino acid sequence.',
                 'COL accession: The protein accession.',
@@ -645,7 +725,8 @@ Seq2Acc_attr = ['COL sequence: The peptide amino acid sequence.',
                 'COL bestczrank: The best position (Mascot pepno) of any identifications of this peptide.',
                 'COL numpeps: The number of times this peptide has been identified.',
                 'COL start: The start location of the first occurrence of this peptide in the protein.',
-                'COL end: The end location of the first occurrence of this peptide in the protein']
+                'COL end: The end location of the first occurrence of this peptide in the protein',
+                'COL hittype: Type of protein hit: FWD (true positive) or REV (false positive)']
 
 
 class Index(tables.IsDescription):
@@ -712,7 +793,8 @@ class UMSpecificity(tables.IsDescription):
     nl_comp = tables.StringCol(100, pos=8)
 
 UMSpecificity_attr = ['COL modid: The Mascot modification identifier.',
-                      'COL group: The Mascot group for the modification. This allows Mascot to consider multiple sites as one modification.',
+                      ('COL group: The Mascot group for the modification. This allows Mascot to consider multiple ' +
+                       'sites as one modification.'),
                       'COL site: The amino acid or terminus where the modifcation can be found.',
                       'COL position: Location that the modification can occur within the peptide / protein.',
                       'COL classification: Biological classification of the potential source of this modification.',
@@ -783,7 +865,161 @@ Quan_attr = ['COL spec_id: Spectrum identifier; corresponds to the Xcalibur spec
              'COL survey_id: The MS1 spectrum prior to the MS/MS event.',
              'COL mzdiff: The m/z difference between the theoretical ion and the identified ion.',
              'COL ppm: mzdiff expressed in parts per million.',
-             'COL coalescence: The measured degree of coalescence between adjacent label ions.  Scale between 0 no coalescnence and 1 fully coalesced.']
+             ('COL coalescence: The measured degree of coalescence between adjacent label ions.  Scale between 0 ' +
+              'no coalescnence and 1 fully coalesced.')]
+
+
+class QuanComparison(tables.IsDescription):
+    """
+    @brief HDF5 table definition for quantification data table
+    """
+    spec_id = tables.Int32Col(pos=0)
+    isolabel_id = tables.Int32Col(pos=1)
+    primary_inten = tables.Float64Col(pos=2)
+    primary_fit_c12 = tables.Float64Col(pos=2)
+    primary_ls = tables.Float64Col(pos=3)
+    primary_sum_ls = tables.Float64Col(pos=4)
+    secondary_inten = tables.Float64Col(pos=5)
+    secondary_fit_c12 = tables.Float64Col(pos=5)
+    secondary_ls = tables.Float64Col(pos=6)
+    secondary_sum_ls = tables.Float64Col(pos=7)
+    pcm = tables.StringCol(255, pos=8)
+    score = tables.Float64Col(pos=9)
+
+QuanComparison_attr = ['COL spec_id: Spectrum identifier; corresponds to the Xcalibur spectrum number.',
+                       'COL isolabel_id: The identifier of the isotope label.',
+                       'COL primary_inten: The intensity value of the isotope label for the primary model fit.',
+                       ('COL primary_inten: The fitted C12 intensity value of the isotope label for the primary ' +
+                        'model fit.'),
+                       'COL primary_ls: The least squares fit parameter for the primary model fit.',
+                       ('COL primary_sum_ls: The sum of all (matched labels) least squares parameters for the ' +
+                        'primary model fit.'),
+                       'COL secondary_inten: The intensity value of the isotope label for the secondary model fit.',
+                       ('COL secondary_inten: The fitted C12 intensity value of the isotope label for the ' +
+                        'secondary model fit.'),
+                       'COL secondary_ls: The least squares fit parameter for the secondary model fit.',
+                       ('COL secondary_sum_ls: The sum of all (matched labels) least squares parameters for the ' +
+                        'secondary model fit.'),
+                       ('COL pcm: A combination of the peptide sequence, charge state and modifications (not ' +
+                        'including the modifications for qauntification.'),
+                       'COL score: The Mascot score for the best pcm.']
+
+
+class QuanExtra(tables.IsDescription):
+    """
+    @brief HDF5 table definition for extra data for MS1 quantification
+    """
+    spec_id = tables.Int32Col(pos=0)
+    ms1SpecID = tables.Int32Col(pos=1)
+    isolabel_id = tables.Int32Col(pos=2)
+    theor_mz = tables.Float64Col(pos=3)
+    sum_theor_int = tables.Float64Col(pos=4)
+    source = tables.StringCol(5, pos=5)
+    prior_ion_ratio_final = tables.Float64Col(pos=6)
+    prior_ion_ratio_xic = tables.Float64Col(pos=7)
+    prior_ion_ratio_apex = tables.Float64Col(pos=8)
+    prior_ion_ratio_prior = tables.Float64Col(pos=9)
+    sum_least_squares = tables.Float64Col(pos=10)
+    max_least_squares = tables.Float64Col(pos=11)
+    xic_mz = tables.Float64Col(pos=12)
+    xic_rt = tables.Float64Col(pos=13)
+    xic_least_squares = tables.Float64Col(pos=14)
+    xic_inten = tables.Float64Col(pos=15)
+    as_mz = tables.Float64Col(pos=16)
+    as_rt = tables.Float64Col(pos=17)
+    as_least_squares = tables.Float64Col(pos=18)
+    as_inten = tables.Float64Col(pos=19)
+    ps_mz = tables.Float64Col(pos=20)
+    ps_rt = tables.Float64Col(pos=21)
+    ps_least_squares = tables.Float64Col(pos=22)
+    ps_inten = tables.Float64Col(pos=23)
+    pcm = tables.StringCol(255, pos=24)
+    thresh = tables.Float64Col(pos=25)
+    score = tables.Float64Col(pos=26)
+
+QuanExtra_attr = ['COL spec_id: Spectrum identifier; corresponds to the Xcalibur spectrum number.',
+                  'COL ms1SpecID: The spectrum identifier for the prior survey spectrum.',
+                  'COL isolabel_id: The identifier of the isotope label.',
+                  'COL theor_mz: The 12C theoretical m/z.',
+                  'COL sum_theor_int: Sum of all the theoretical intensities for all isotopes.',
+                  'COL source: The source of the intensity values: XIC / apex / prior.',
+                  'COL prior_ion_ratio_final: The identifier of the isotope label.',
+                  'COL prior_ion_ratio_xic: The prior ion ratio calculate from the XIC data.',
+                  'COL prior_ion_ratio_apex: The prior ion ratio calculate from the apex survey spectrum.',
+                  'COL prior_ion_ratio_prior: The prior ion ratio calculate from the prior survey spectrum.',
+                  'COL sum_least_squares: Sum of all the least squares values from all labels.',
+                  'COL max_least_squares: The maximum least squares value from all lables.',
+                  'COL xic_mz: The 12C ion m/z from the xic peak.',
+                  'COL xic_rt: The retention time of the prior xic peak.',
+                  'COL xic_least_squares: The least squares fit value from the prior xic peak.',
+                  'COL xic_inten: The 12C ion intensity from the prior xic peak.',
+                  'COL as_mz: The 12C ion m/z from the apex survey spectrum.',
+                  'COL as_rt: The retention time of the apex survey spectrum.',
+                  'COL as_least_squares: The least squares fit value from the apex survey spectrum.',
+                  'COL as_inten: The 12C ion intensity from the apex survey spectrum.',
+                  'COL ps_mz: The 12C ion m/z from the prior survey spectrum.',
+                  'COL ps_rt: The retention time of the prior survey spectrum.',
+                  'COL ps_least_squares: The least squares fit value from the prior survey spectrum.',
+                  'COL ps_inten: The 12C ion intensity from the prior survey spectrum.',
+                  'COL pcm: The identifier of the isotope label.',
+                  'COL thresh: The identifier of the isotope label.',
+                  'COL score: The identifier of the isotope label.']
+
+
+class QuanIso(tables.IsDescription):
+    """
+    @brief HDF5 table definition for isotope data from MS1 quantification
+    """
+    spec_id = tables.Int32Col(pos=0)
+    isolabel_id = tables.Int32Col(pos=1)
+    source = tables.StringCol(5, pos=2)
+    isointen_m1 = tables.Float64Col(pos=3)
+    isointen_0 = tables.Float64Col(pos=4)
+    isointen_p1 = tables.Float64Col(pos=5)
+    isointen_p2 = tables.Float64Col(pos=6)
+    isointen_p3 = tables.Float64Col(pos=7)
+    isointen_p4 = tables.Float64Col(pos=8)
+    isointen_p5 = tables.Float64Col(pos=9)
+
+QuanIso_attr = ['COL spec_id: Spectrum identifier; corresponds to the Xcalibur spectrum number.',
+                'COL isolabel_id: The identifier of the isotope label.',
+                'COL source: The source of the intensity values: XIC / apex / prior.',
+                'COL isointen_m1: The intensity of the monoiosopic -1 Da ion.',
+                'COL isointen_0: The intensity of the monoiosopic.',
+                'COL isointen_p1: The intensity of the monoiosopic +1 Da ion.',
+                'COL isointen_p2: The intensity of the monoiosopic +2 Da ion.',
+                'COL isointen_p3: The intensity of the monoiosopic +3 Da ion.',
+                'COL isointen_p4: The intensity of the monoiosopic +4 Da ion.',
+                'COL isointen_p5: The intensity of the monoiosopic +5 Da ion.']
+
+
+class QuanError(tables.IsDescription):
+    """
+    @brief HDF5 table definition for MS1 quantification failures
+    """
+    spec_id = tables.Int32Col(pos=0)
+    isolabel_id = tables.Int32Col(pos=1)
+    source = tables.StringCol(5, pos=2)
+    specID_apex = tables.Int32Col(pos=3)
+    foundMZ_apex = tables.Float64Col(pos=4)
+    foundInten_apex = tables.Float64Col(pos=5)
+    foundMZDelta_apex = tables.Float64Col(pos=6)
+    specID_prior = tables.Int32Col(pos=7)
+    foundMZ_prior = tables.Float64Col(pos=8)
+    foundInten_prior = tables.Float64Col(pos=9)
+    foundMZDelta_prior = tables.Float64Col(pos=10)
+
+QuanError_attr = ['COL spec_id: Spectrum identifier; corresponds to the Xcalibur spectrum number.',
+                  'COL isolabel_id: The identifier of the isotope label.',
+                  'COL source: The missing isotope.',
+                  'COL specID_apex: The spectrum identifier of the peak apex of the XIC.',
+                  'COL foundMZ_apex: The corresponding m/z found at the peak apex.',
+                  'COL foundInten_apex: The intensity found for the apex ion.',
+                  'COL foundMZDelta_apex: The m/z difference for the apex ion.',
+                  'COL specID_prior: The spectrum identifier of the prior survey spectrum.',
+                  'COL foundMZ_prior: The corresponding m/z found at the prior spectrum.',
+                  'COL foundInten_prior: The intensity found for the prior spectrum ion.',
+                  'COL foundMZDelta_prior: The m/z difference for the prior spectrum ion.']
 
 
 class CalMasses(tables.IsDescription):
@@ -805,15 +1041,18 @@ class CalMasses(tables.IsDescription):
     prec_charge = tables.Int32Col(pos=12)
     hitType = tables.StringCol(255, pos=13)
 
-CalMasses_attr = ['COL query: SThe mascot assigned spectrum identifier.',
+CalMasses_attr = ['COL query: The mascot assigned spectrum identifier.',
                   'COL pepno: The Mascot assigned order of this peptide match to this query.',
                   'COL spec_id: Spectrum identifier; corresponds to the Xcalibur spectrum number.',
                   'COL rt: The retention time of the spectrum.',
                   "COL sequence: Peptide's amino acid sequence.",
-                  'COL modsVariable: Description of the Mascot identified variable modifications . e.g. 2 Oxidation (M); 1 TMT6plex (N-term).',
-                  'COL modsFixed: Description of the Mascot identified fixed modifications .  e.g. 1 Carbamidomethyl (C); 1 TMT6plex (K).',
+                  ('COL modsVariable: Description of the Mascot identified variable modifications. ' +
+                   'e.g. 2 Oxidation (M); 1 TMT6plex (N-term).'),
+                  ('COL modsFixed: Description of the Mascot identified fixed modifications.  ' +
+                   'e.g. 1 Carbamidomethyl (C); 1 TMT6plex (K).'),
                   'COL mass: Calculated molecular mass of the peptide sequence.',
-                  'COL da_delta: Mass difference between the sequence mass (mw) and the neutral_mass in Da. Corresponds to Mascot delta.',
+                  ('COL da_delta: Mass difference between the sequence mass (mw) and the neutral_mass in Da. ' +
+                   'Corresponds to Mascot delta.'),
                   'COL score: The Mascot score.',
                   'COL prec_neutmass: The precursor m/z turned into zero charge state.',
                   'COL prec_mz: The precursor m/z.',
@@ -822,9 +1061,9 @@ CalMasses_attr = ['COL query: SThe mascot assigned spectrum identifier.',
 
 
 class ResultSample(tables.IsDescription):
-    '''
+    """
     @brief HDF5 table definition for teh stand alone results Sample table
-    '''
+    """
 
     sample_id = tables.Int32Col(pos=0)
     source_file = tables.StringCol(150, pos=1)
@@ -840,22 +1079,31 @@ class ResultSample(tables.IsDescription):
 
 
 ResultSample_attr = ['COL sample_id: Generated identifier of the sample where the spectrum was measured. Master entry.',
-                     'COL source_file: The file name of the original Xcalibur .raw file name from which the data were acquired.',
+                     ('COL source_file: The file name of the original Xcalibur .raw file name from which the data' +
+                      'were acquired.'),
                      'COL acquisition_time: The total acquisition time of the Xcalibur analysis ',
                      'COL acquired_spectra: The number of MS/MS events acquired in the Xcalibur raw file.',
                      'COL mascot_matched_spectra: The number of spectra  for which Mascot found a peptide match.',
-                     'COL spectra_in_qc_proteins: The number of spectra with peptides linked to proteins fulfilling all QC criteria.',
-                     'COL quantified_spectra: The number of spectra fulfilling all quantification-specific QC criteria linked to validated proteins.',
-                     'COL mean_precursor_ion_accuracy: The precursor ion accuracy is calculated as: (measured precursor ion m/z - theoretical peptide m/z) / theoretical peptide m/z, expressed in ppm.  The mean is calculated from all spectra linked to accepted proteins.',
-                     'COL sd_precursor_ion_accuracy: The standard deviation of the data calculated for the mean_precursor_ion_accuracy, expressed in Th.',
-                     'COL mean_reporter_ion_accuracy: The reporter ion accuracy is calculated as: measured m/z - theoretical m/z, expressed in Th.  The mean is calculated from all detected reporter ions from all spectra with a linked to a valid protein.',
-                     'COL sd_reporter_ion_accuracy: The standard deviation of the data calculated for the mean_reporter_ion_accuracy']
+                     ('COL spectra_in_qc_proteins: The number of spectra with peptides linked to proteins fulfilling' +
+                      'all QC criteria.'),
+                     ('COL quantified_spectra: The number of spectra fulfilling all quantification-specific QC ' +
+                      'criteria linked to validated proteins.'),
+                     ('COL mean_precursor_ion_accuracy: The precursor ion accuracy is calculated as: (measured ' +
+                      'precursor ion m/z - theoretical peptide m/z) / theoretical peptide m/z, expressed in ppm.  ' +
+                      'The mean is calculated from all spectra linked to accepted proteins.'),
+                     ('COL sd_precursor_ion_accuracy: The standard deviation of the data calculated for the ' +
+                      'mean_precursor_ion_accuracy, expressed in Th.'),
+                     ('COL mean_reporter_ion_accuracy: The reporter ion accuracy is calculated as: ' +
+                      'measured m/z - theoretical m/z, expressed in Th.  The mean is calculated from all detected ' +
+                      'reporter ions from all spectra with a linked to a valid protein.'),
+                     ('COL sd_reporter_ion_accuracy: The standard deviation of the data calculated for the ' +
+                      'mean_reporter_ion_accuracy')]
 
 
 class ResultSpectrum(tables.IsDescription):
-    '''
+    """
     @brief HDF5 table definition for teh stand alone results Spectrum table
-    '''
+    """
 
     spectrum_id = tables.Int32Col(pos=0)
     sample_id = tables.Int32Col(pos=1)
@@ -866,39 +1114,50 @@ class ResultSpectrum(tables.IsDescription):
     precursor_mz = tables.Float32Col(pos=6)
     s2i = tables.Float32Col(pos=7)
     p2t = tables.Float32Col(pos=8)
-    survey_id = tables.Int32Col(pos=9)
-    start_time = tables.Float32Col(pos=10)
-    peak_rt = tables.Float32Col(pos=11)
-    peak_intensity = tables.Float32Col(pos=12)
-    peak_fwhm = tables.Float32Col(pos=13)
-    sum_reporter_ions = tables.Float32Col(pos=14)
-    quant_cancelled = tables.Int32Col(pos=15)
+    rt = tables.Float32Col(pos=9)
+    survey_id = tables.Int32Col(pos=10)
+    start_time = tables.Float32Col(pos=11)
+    peak_rt = tables.Float32Col(pos=12)
+    peak_intensity = tables.Float32Col(pos=13)
+    peak_fwhm = tables.Float32Col(pos=14)
+    sum_reporter_ions = tables.Float32Col(pos=15)
+    quant_cancelled = tables.Int32Col(pos=16)
     charge_state = tables.Int32Col(pos=17)
 
 
-ResultSpectrum_attr = ['COL spectrum_id: Assigned identifier for this spectrum.  Is unique across all merged datasets in a single analysis.  Master entry.',
+ResultSpectrum_attr = [('COL spectrum_id: Assigned identifier for this spectrum.  Is unique across all merged ' +
+                        'datasets in a single analysis.  Master entry.'),
                        'COL sample_id: Generated identifier of the sample where the spectrum was measured.',
-                       'COL msms_id: Identifier of MS/MS spectrum from the raw data file. Non unique across merged datasets.',
+                       ('COL msms_id: Identifier of MS/MS spectrum from the raw data file. Non unique across ' +
+                        'merged datasets.'),
                        'COL query: The spectrum identifier as assigned by Mascot.',
-                       'COL neutral_mass: The neutral mass calculated from the precursor_mz by Mascot. Corresponds to neutral_mass in Mascot.',
-                       'COL parent_ion: The actual m/z setting used by the instrument for the isolation of the precursor ion.',
-                       'COL precursor_mz: Observed m/z of precursor ion. Corresponds to "observed" in Mascot .dat file.',
+                       ('COL neutral_mass: The neutral mass calculated from the precursor_mz by Mascot. Corresponds ' +
+                        'to neutral_mass in Mascot.'),
+                       ('COL parent_ion: The actual m/z setting used by the instrument for the isolation of the ' +
+                        'precursor ion.'),
+                       ('COL precursor_mz: Observed m/z of precursor ion. Corresponds to "observed" in Mascot ' +
+                        '.dat file.'),
                        'COL s2i: Signal-to-interference value for the precursor ion of this spectrum',
-                       'COL p2t: Intensity- to -noise value for the precursor ion of this spectrum.  (p2t = precursor-to-threshold)',
-                       'COL survey_id: Identifier of the survey spectrum from the .raw file. Non unique across merged datasets.',
+                       ('COL p2t: Intensity- to -noise value for the precursor ion of this spectrum.  ' +
+                        '(p2t = precursor-to-threshold)'),
+                       'COL rt: retention time of the spectrum.',
+                       ('COL survey_id: Identifier of the survey spectrum from the .raw file. Non unique across ' +
+                        'merged datasets.'),
                        'COL start_time: Retention time  for the MS/MS event',
-                       'COL peak_rt: Retention time of the apex of the chromatographic peak identified linked to this spectrum.',
+                       ('COL peak_rt: Retention time of the apex of the chromatographic peak identified linked ' +
+                        'to this spectrum.'),
                        'COL peak_intensity: Maximum intensity of the XIC peak identified from this spectrum.',
-                       'COL peak_fwhm: The full width at half maximum intensity of the chromatographic peak identified from this spectrum.',
+                       ('COL peak_fwhm: The full width at half maximum intensity of the chromatographic peak ' +
+                        'identified from this spectrum.'),
                        'COL sum_reporter_ions: Sum of all reporter ion intensities in this spectrum.',
                        'COL quant_cancelled: Is the quantification of this spectrum cancelled',
                        'COL charge_state: Charge state of the precursor ion.']
 
 
 class ResultSpecQuant(tables.IsDescription):
-    '''
+    """
     @brief HDF5 table definition for the stand alone results SpecQuant table
-    '''
+    """
 
     spectrum_id = tables.Int32Col(pos=0)
     isotopelabel_id = tables.Int32Col(pos=1)
@@ -914,28 +1173,49 @@ class ResultSpecQuant(tables.IsDescription):
     peptide_length = tables.Int32Col(pos=11)
     is_unique = tables.Int32Col(pos=12)
     fdr_at_score = tables.Float32Col(pos=13)
+    prior_ion_ratio = tables.Float32Col(pos=14)
+    least_squares = tables.Float32Col(pos=15)
+    ms1source = tables.StringCol(20, pos=16)
 
 
-ResultSpecQuant_attr = ['COL spectrum_id: Assigned identifier for this spectrum.  Is unique across all merged datasets in a single analysis. Corresponds to master entry in spectrum table.',
-                        'COL isotopelabel_id: Isotope label identifier.  These are defined in the QuantMethod.cfg file and should be unique across all quantification methods.',
-                        'COL protein_group_no: Generated protein number to which the peptide sequence is matched. Corresponds to protein entry in proteins output.',
-                        'COL quant_raw: Unprocessed quantification value.  In MS2 quantification this is the intensity of the reporter ion.',
-                        'COL quant_isocorrected: Quantification value following subtraction of isotope interference from adjacent label(s).',
+ResultSpecQuant_attr = [('COL spectrum_id: Assigned identifier for this spectrum.  Is unique across all merged ' +
+                         'datasets in a single analysis. Corresponds to master entry in spectrum table.'),
+                        ('COL isotopelabel_id: Isotope label identifier.  These are defined in the QuantMethod.cfg ' +
+                         'file and should be unique across all quantification methods.'),
+                        ('COL protein_group_no: Generated protein number to which the peptide sequence is matched. ' +
+                         'Corresponds to protein entry in proteins output.'),
+                        ('COL quant_raw: Unprocessed quantification value.  In MS2 quantification this is the ' +
+                         'intensity of the reporter ion.'),
+                        ('COL quant_isocorrected: Quantification value following subtraction of isotope interference ' +
+                         'from adjacent label(s).'),
                         'COL quant_allcorrected: Quantification value after all corrections have been applied.',
                         'COL score: Mascot score',
-                        'COL delta_seq: Difference in Mascot scores between this Mascot sequence match and the next highest scoring sequence match. If delta_seq equals zero or if it is above the delta_seq_threshold its quant values may be used for protein quantification.',
-                        "COL s2i: Signal-to-interference value for the precursor ion of this spectrum. If the s2i value is above s2ithreshold the peptide's quantification values may be used for protein quantification.",
-                        'COL p2t: Intensity-to-noise value for the precursor ion of this spectrum. If the p2t value is above p2tthreshold the peptides quantification values may be used for protein quantification. (p2t = precursor2threshold).',
-                        "COL in_quantification_of_protein: Equal to 1 if peptide's reporter ions are used for protein quantification.",
-                        'COL fdr_at_score: Calculated peptide false discovery rate for this Mascot score. This may be used as a threshold to exclude peptide from use in protein quantification and from protein inference.',
+                        ('COL delta_seq: Difference in Mascot scores between this Mascot sequence match and the ' +
+                         'next highest scoring sequence match. If delta_seq equals zero or if it is above the ' +
+                         'delta_seq_threshold its quant values may be used for protein quantification.'),
+                        ('COL s2i: Signal-to-interference value for the precursor ion of this spectrum. If the ' +
+                         "s2i value is above s2ithreshold the peptide's quantification values may be used for " +
+                         'protein quantification.'),
+                        ('COL p2t: Intensity-to-noise value for the precursor ion of this spectrum. If the p2t ' +
+                         'value is above p2tthreshold the peptides quantification values may be used for protein ' +
+                         'quantification. (p2t = precursor2threshold).'),
+                        ("COL in_quantification_of_protein: Equal to 1 if peptide's reporter ions are used for " +
+                         'protein quantification.'),
+                        ('COL fdr_at_score: Calculated peptide false discovery rate for this Mascot score. This ' +
+                         'may be used as a threshold to exclude peptide from use in protein quantification and ' +
+                         'from protein inference.'),
                         'COL peptide_length: Length of the peptide sequence.',
-                        'COL is_unique: Peptide sequence is found uniquely in given protein group. This is required for its quant values to be used in protein quantification.']
+                        'COL least_squares: value for least squares fit of XIC of ms1',
+                        'COL prior_ion: value for prior ion value',
+                        'COL ms1source: source of MS1 quantification',
+                        ('COL is_unique: Peptide sequence is found uniquely in given protein group. This is ' +
+                         'required for its quant values to be used in protein quantification.')]
 
 
 class ResultPeptide(tables.IsDescription):
-    '''
+    """
     @brief HDF5 table definition for teh stand alone results Peptide table
-    '''
+    """
 
     peptide_id = tables.Int32Col(pos=0)
     spectrum_id = tables.Int32Col(pos=1)
@@ -956,47 +1236,74 @@ class ResultPeptide(tables.IsDescription):
     is_duplicate = tables.Int32Col(pos=16)
     is_first_use_of_sequence = tables.Int32Col(pos=17)
     is_unique = tables.Int32Col(pos=18)
-    is_reverse_hit = tables.Int32Col(pos=19)
+    is_decoy = tables.Int32Col(pos=19)
     is_quantified = tables.Int32Col(pos=20)
     failed_fdr_filter = tables.Int32Col(pos=21)
     fdr_at_score = tables.Float32Col(pos=22)
     in_protein_inference = tables.Int32Col(pos=23)
-    seq_start = tables.Int32Col(pos=24)
-    seq_end = tables.Int32Col(pos=25)
+    in_top3 = tables.Int32Col(pos=24)
+    seq_start = tables.Int32Col(pos=25)
+    seq_end = tables.Int32Col(pos=26)
 
 
 ResultPeptide_attr = ['COL peptide_id: Generated unique identifier for this peptide record.',
-                      'COL spectrum_id: Assigned identifier for this spectrum.  Is unique across all merged datasets in a single analysis. Corresponds to master entry in spectrum table.',
-                      'COL protein_group_no: Generated protein number to which the peptide sequence is matched. Corresponds to master entry in proteinhit table.',
-                      "COL peptide: Peptide's amino acid sequence. The length of the peptide sequence is used in peptide QC and to exclude it from use in protein quantification. This is given as sequence in the output.",
-                      'COL variable_modstring: Description of the Mascot identified variable modifications . e.g. 2 Oxidation (M); 1 TMT6plex (N-term).',
-                      'COL fixed_modstring: Description of the Mascot identified fixed modifications .  e.g. 1 Carbamidomethyl (C); 1 TMT6plex (K).',
-                      'COL positional_modstring: Description of all modifications with their position in the sequence .  e.g. TMT6plex:0; Carbamidomethyl:2; Oxidation:3; Oxidation:10; TMT6plex:12.',
-                      'COL score: Score assigned to spectrum-to-protein match by Mascot. This may be used as a threshold to exclude peptide from being used for protein quantification.',
-                      'COL rank: Rank of spectrum to protein match within Mascots list of ten suggestions. Only rank1 peptides are quantified.',
-                      'COL mw: Calculated molecular mass of the peptide sequence corresponds to mrcalc in Mascot .dat file.',
-                      'COL da_delta: Mass difference between the sequence mass (mw) and the neutral_mass in Da. Corresponds to Mascot delta.',
+                      ('COL spectrum_id: Assigned identifier for this spectrum.  Is unique across all merged ' +
+                       'datasets in a single analysis. Corresponds to master entry in spectrum table.'),
+                      ('COL protein_group_no: Generated protein number to which the peptide sequence is matched. ' +
+                       'Corresponds to master entry in proteinhit table.'),
+                      ("COL peptide: Peptide's amino acid sequence. The length of the peptide sequence is used in " +
+                       'peptide QC and to exclude it from use in protein quantification. This is given as ' +
+                       'sequence in the output.'),
+                      ('COL variable_modstring: Description of the Mascot identified variable modifications. ' +
+                       'e.g. 2 Oxidation (M); 1 TMT6plex (N-term).'),
+                      ('COL fixed_modstring: Description of the Mascot identified fixed modifications.  ' +
+                       'e.g. 1 Carbamidomethyl (C); 1 TMT6plex (K).'),
+                      ('COL positional_modstring: Description of all modifications with their position in the ' +
+                       'sequence.  e.g. TMT6plex:0; Carbamidomethyl:2; Oxidation:3; Oxidation:10; TMT6plex:12.'),
+                      ('COL score: Score assigned to spectrum-to-protein match by Mascot. This may be used as a ' +
+                       'threshold to exclude peptide from being used for protein quantification.'),
+                      ('COL rank: Rank of spectrum to protein match within Mascots list of ten suggestions. ' +
+                       'Only rank1 peptides are quantified.'),
+                      ('COL mw: Calculated molecular mass of the peptide sequence corresponds to mrcalc in ' +
+                       'Mascot .dat file.'),
+                      ('COL da_delta: Mass difference between the sequence mass (mw) and the neutral_mass in Da. ' +
+                       'Corresponds to Mascot delta.'),
                       'COL ppm_error: da_error expressed in ppm.',
-                      'COL missed_cleavage_sites: Number of sites on the peptide sequence where expected cleavage by the protease failed to occur.',
-                      'COL delta_seq: Difference in Mascot scores between this Mascot sequence match and the next highest scoring sequence match.',
-                      'COL delta_mod: Difference in Mascot scores between the best two modification variants of this sequence. See ref - pubmed #21057138.',
+                      ('COL missed_cleavage_sites: Number of sites on the peptide sequence where expected cleavage ' +
+                       'by the protease failed to occur.'),
+                      ('COL delta_seq: Difference in Mascot scores between this Mascot sequence match and the ' +
+                       'next highest scoring sequence match.'),
+                      ('COL delta_mod: Difference in Mascot scores between the best two modification variants of ' +
+                       'this sequence. See ref - pubmed #21057138.'),
                       'COL is_hook: Equals 1 if this is a hook peptide.',
-                      'COL is_duplicate: When multiple identifications are made to the same sequence the highest scoring identification has is_duplicate =0. All other identifications have is_duplicate = 1.',
-                      'COL is_first_use_of_sequence: Equals 1  for the first occurrence of this peptide sequence across all protein groups when they are ordered by descending total_score.',
-                      'COL is_unique: Peptide sequence is found uniquely in given protein group. This is required for its quant values to be used in protein quantification.',
-                      'COL is_reverse_hit: Equals 1 if peptide sequence maps only to a protein from the reverse database.',
-                      'COL is_quantified: Equals 1 if peptide links to at least one quantification event (reporter ion)',
-                      "COL failed_fdr_filter: Equals 1 if peptide's FDR is above the threshold given at runtime. This means it is not used for quantification or for protein inference during the aggregation / re-assignment step.",
-                      'COL fdr_at_score: Calculated peptide false discovery rate for this score. This may be used as a threshold to exclude peptide from use in protein quantification and from protein inference.',
+                      ('COL is_duplicate: When multiple identifications are made to the same sequence the highest ' +
+                       'scoring identification has is_duplicate =0. All other identifications have is_duplicate = 1.'),
+                      ('COL is_first_use_of_sequence: Equals 1  for the first occurrence of this peptide sequence ' +
+                       'across all protein groups when they are ordered by descending total_score.'),
+                      ('COL is_unique: Peptide sequence is found uniquely in given protein group. This is required ' +
+                       'for its quant values to be used in protein quantification.'),
+                      ('COL is_decoy: Equals 1 if peptide sequence maps only to a protein from the ' +
+                       'reverse database.'),
+                      ('COL is_quantified: Equals 1 if peptide links to at least one quantification event ' +
+                       '(reporter ion)'),
+                      ("COL failed_fdr_filter: Equals 1 if peptide's FDR is above the threshold given at runtime. " +
+                       'This means it is not used for quantification or for protein inference during the ' +
+                       'aggregation / re-assignment step.'),
+                      ('COL fdr_at_score: Calculated peptide false discovery rate for this score. This may be ' +
+                       'used as a threshold to exclude peptide from use in protein quantification and from ' +
+                       'protein inference.'),
                       'COL in_protein_inference: Equals 1 if peptide sequence is used in assignment of protein groups.',
-                      'COL seq_start: Peptide start position on protein sequence given by first identifying accession in protein group.',
-                      'COL seq_end: Peptide end position on protein sequence given by first identifying accession in protein group.']
+                      'COL in_top_3: Equals 1 if peptide sequence is used in top3 calculation.',
+                      ('COL seq_start: Peptide start position on protein sequence given by first identifying ' +
+                       'accession in protein group.'),
+                      ('COL seq_end: Peptide end position on protein sequence given by first identifying ' +
+                       'accession in protein group.')]
 
 
 class ResultProteinHit(tables.IsDescription):
-    '''
+    """
     @brief HDF5 table definition for teh stand alone results ProteinHit table
-    '''
+    """
 
     protein_group_no = tables.Int32Col(pos=0)
     protein_id = tables.StringCol(100, pos=1)
@@ -1008,30 +1315,47 @@ class ResultProteinHit(tables.IsDescription):
     hssm = tables.Int32Col(pos=7)
     hookscore = tables.Float32Col(pos=8)
     upm = tables.Int32Col(pos=9)
-    is_reverse_hit = tables.Int32Col(pos=10)
-    protein_fdr = tables.Float32Col(pos=11)
-    max_score = tables.Float32Col(pos=12)
+    is_decoy = tables.Int32Col(pos=10)
+    top3 = tables.Float32Col(pos=11)
+    protein_fdr = tables.Float32Col(pos=12)
+    max_score = tables.Float32Col(pos=13)
 
 
 ResultProteinHit_attr = ['COL protein_group_no: Generated protein number for this protein group. Master entry.',
-                         'COL protein_id: Identifying accession(s) from protein database. In cases where all identified peptides match to more than one protein sequence, all possible accessions are given here. The order in which the accessions are presented determines the order of the corresponding information in the description and mw columns. This protein_id can be used to match proteins across files from multiple experiments (as opposed to protein_group_no).',
-                         'COL description: Description line from .fasta file used in Mascot search. More than one entry possible.',
-                         'COL gene_name: For data searched with Uniprot fasta files only. This corresponds to the GN value given in the description line of the fasta file. For multiple peptide match entries this value is the minimal set of gene names associated with the entry. This may be a more appropriate identifier used for matching proteins between files from multiple experiments.',
-                         'COL mw: Molecular weight of full protein sequences. More than one entry possible see definition of protein_id.',
-                         'COL ssm: Number of spectrum-to-sequence matches [peptides] in protein group (ssm=spectrum-sequence matches).',
-                         'COL total_score: Sum of mascot scores for all peptides in protein group greater than peptide FDR threshold. Note that only highest Mascot score is counted for all versions of peptide sequence in that group',
-                         'COL hssm: Number of spectra matched to hook peptides in protein group. See definition of hook peptide above. hssm = hook sequence-spectra matches.',
+                         ('COL protein_id: Identifying accession(s) from protein database. In cases where all ' +
+                          'identified peptides match to more than one protein sequence, all possible accessions ' +
+                          'are given here. The order in which the accessions are presented determines the order of ' +
+                          'the corresponding information in the description and mw columns. This protein_id can be ' +
+                          'used to match proteins across files from multiple experiments ' +
+                          '(as opposed to protein_group_no).'),
+                         ('COL description: Description line from .fasta file used in Mascot search. More than ' +
+                          'one entry possible.'),
+                         ('COL gene_name: For data searched with Uniprot fasta files only. This corresponds to ' +
+                          'the GN value given in the description line of the fasta file. For multiple peptide ' +
+                          'match entries this value is the minimal set of gene names associated with the entry. ' +
+                          'This may be a more appropriate identifier used for matching proteins between files ' +
+                          'from multiple experiments.'),
+                         ('COL mw: Molecular weight of full protein sequences. More than one entry possible see ' +
+                          'definition of protein_id.'),
+                         ('COL ssm: Number of spectrum-to-sequence matches [peptides] in protein group ' +
+                          '(ssm=spectrum-sequence matches).'),
+                         ('COL total_score: Sum of mascot scores for all peptides in protein group greater than ' +
+                          'peptide FDR threshold. Note that only highest Mascot score is counted for all versions ' +
+                          'of peptide sequence in that group'),
+                         ('COL hssm: Number of spectra matched to hook peptides in protein group. See definition ' +
+                          'of hook peptide above. hssm = hook sequence-spectra matches.'),
                          'COL hookscore: Sum of the Mascot scores for the matched Hook peptides',
-                         'COL upm: Number of peptide sequences in protein group that are unique to it (upm=unique peptide matches).',
-                         'COL is_reverse_hit: is the match a false positive match',
+                         ('COL upm: Number of peptide sequences in protein group that are unique to it ' +
+                          'upm=unique peptide matches).'),
+                         'COL is_decoy: is the match a false positive match',
                          'COL protein_fdr: False discovery rate for protein based on max_score.',
                          'COL max_score: Maximum Mascot score of all peptides in protein group.']
 
 
 class ResultStatistics(tables.IsDescription):
-    '''
+    """
     @brief HDF5 table definition for the stand alone results statistics table
-    '''
+    """
 
     statistic = tables.StringCol(100, pos=0)
     value = tables.StringCol(200, pos=1)
@@ -1042,9 +1366,9 @@ ResultStatistics_attr = ['COL statistic: Name of summary statistic',
 
 
 class ResultProteinQuant(tables.IsDescription):
-    '''
+    """
     @brief HDF5 table definition for teh stand alone results ProteinQuant table
-    '''
+    """
 
     protein_group_no = tables.Int32Col(pos=0)
     isotopelabel_id = tables.Int32Col(pos=1)
@@ -1057,34 +1381,43 @@ class ResultProteinQuant(tables.IsDescription):
     qupm = tables.Int32Col(pos=8)
 
 
-ResultProteinQuant_attr = ['COL protein_group_no: Generated protein number to which the peptide sequence is matched. Corresponds to master entry in proteinhit table.',
-                           'COL isotopelabel_id: Isotope label identifier.  These are defined in the QuantMethod.cfg file and should be unique across all quantification methods.',
-                           'COL reference_label: Name of reporter ion label corresponding to the control on which relative protein quantification is based.',
+ResultProteinQuant_attr = [('COL protein_group_no: Generated protein number to which the peptide sequence is ' +
+                            'matched. Corresponds to master entry in proteinhit table.'),
+                           ('COL isotopelabel_id: Isotope label identifier.  These are defined in the ' +
+                            'QuantMethod.cfg file and should be unique across all quantification methods.'),
+                           ('COL reference_label: Name of reporter ion label corresponding to the control on which ' +
+                            'relative protein quantification is based.'),
                            'COL protein_fold_change: Protein fold change compared to reference.',
-                           'COL lower_confidence_level: Lower bound of confidence level interval for the protein fold change.',
-                           'COL upper_confidence_level: Upper bound of confidence level interval for the protein fold change.',
-                           'COL sum_quant_signal: Sum of all reporter ion signals of valid quantifiable peptides in protein group following all relevant corrections.',
-                           'COL qssm: Number of spectrum to sequence matches [peptides] in protein group with reporter ions used in protein quantification (qssm =quantfied spectrum-sequence matches).',
-                           'COL qupm: Number of unique peptide sequences in protein group with reporter ions used in protein quantification (qupm=quantified unique peptide matches).']
+                           ('COL lower_confidence_level: Lower bound of confidence level interval for the ' +
+                            'protein fold change.'),
+                           ('COL upper_confidence_level: Upper bound of confidence level interval for the protein ' +
+                            'fold change.'),
+                           ('COL sum_quant_signal: Sum of all reporter ion signals of valid quantifiable peptides ' +
+                            'in protein group following all relevant corrections.'),
+                           ('COL qssm: Number of spectrum to sequence matches [peptides] in protein group with ' +
+                            'reporter ions used in protein quantification (qssm =quantfied spectrum-sequence ' +
+                            'matches).'),
+                           ('COL qupm: Number of unique peptide sequences in protein group with reporter ions ' +
+                            'used in protein quantification (qupm=quantified unique peptide matches).')]
 
 
 class FDRData(tables.IsDescription):
     data_type = tables.StringCol(50, pos=0)
     score = tables.Float32Col(pos=1)
-    reverse_hits = tables.Int32Col(pos=2)
-    forward_hits = tables.Int32Col(pos=3)
+    decoy_hits = tables.Int32Col(pos=2)
+    target_hits = tables.Int32Col(pos=3)
     global_fdr = tables.Float32Col(pos=4)
     local_fdr = tables.Float32Col(pos=5)
-    true_spectra = tables.Int32Col(pos=6)
+    true_hits = tables.Int32Col(pos=6)
 
 
 FDRData_attr = ['COL data_type: Describes whether the data is a peptide or protein based FDR',
                 'COL score: Mascot score',
-                'COL reverse_hits: Number of reverse (false) hits at Mascot score',
-                'COL forward_hits: Number of forward (true) hits at Mascot score',
+                'COL decoy_hits: Number of reverse (false) hits at Mascot score',
+                'COL target_hits: Number of forward (true) hits at Mascot score',
                 'COL global_fdr: FDR for Mascot score >= score',
                 'COL local_fdr: FDR for Mascot score = score',
-                'COL true_spectra: Number of spectra with Mascot score >= score']
+                'COL true_hits: Number of spectra with Mascot score >= score']
 
 
 class ResultConfigParameters(tables.IsDescription):

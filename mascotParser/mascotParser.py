@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -19,7 +19,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 # package imports
@@ -56,7 +56,6 @@ def jobcontrol(cfg, logs):
 
         filedic = dict(dat=datFileName, datpath=dataDir.joinpath(datFileName),
                        hdf5=hdf5FileName, hdf5path=dataDir.joinpath(hdf5FileName))
-        searchID = int(filedic['datpath'].stem[1:])
 
         hdfMascot = HDF5Mascot(hdfFilePath=filedic['hdf5path'])
         hdfMascot.appendOpen()
@@ -76,23 +75,16 @@ def jobcontrol(cfg, logs):
         # control the deletion of existing data
         msg = 'Deleting existing HDF5 data'
         hdfMascot.deleteAllMascotImports(0)
-        # if overwrite:
-        #     # delte all Mascot data whatever the source
-        #     hdfMascot.deleteAllMascotImports(0)
-        # elif importGroup:
-        #     # delete previous version of this data
-        #     hdfMascot.deleteMascotImport(importGroup)
 
         importGroup = filedic['dat'].replace('.', '_')
 
-        hdfMascot.createTables(importGroup, searchID, 0)
+        hdfMascot.createTables(importGroup, 0)
 
         hdfMascot.writeConfig(cfg.convertConfig())
 
-        datfile = Datfile(filedic, hdfMascot, cfg, logs, searchID, quantMethod)
+        datfile = Datfile(filedic, hdfMascot, cfg, logs, quantMethod)
 
-        logs.setuplog.info('searchid: %d, dat file: %s, hdf5 file: %s ' % (searchID, datfile.datfilename,
-                                                                           filedic['hdf5']))
+        logs.setuplog.info('dat file: %s, hdf5 file: %s ' % (datfile.datfilename, filedic['hdf5']))
 
         msg = 'Parsing data'
         datparser = DatParser(datfile, cfg, logs)
@@ -105,7 +97,6 @@ def jobcontrol(cfg, logs):
 
         msg = 'Find top protein hit'
         logs.qclog.info(msg)
-        # tophit = db.getMascotTopHit(searchID)
         if datfile.seq2acc:
             datfile.findBestProtein()
     except Exception as genEx:
@@ -124,7 +115,6 @@ def jobcontrol(cfg, logs):
 # ########### MAIN ###############
 if __name__ == '__main__':
     logs = 0
-    # try:
     cfg = ConfigManager('./mascotparser.cfg')
     ret = cfg.evaluateCommandLineArgs(sys.argv)
 

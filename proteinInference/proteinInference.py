@@ -4,6 +4,7 @@
 from pathlib import Path
 import os
 import sys
+import numpy as np
 
 # CommonUtils imports
 
@@ -15,6 +16,7 @@ from CommonUtils.LoggingManager import Logger
 from CommonUtils.hdf5Results import HDF5Results
 from CommonUtils.QuantMethodHandler import QuantMethods
 import CommonUtils.progressbar as progBar
+from CommonUtils.progressReport import progressReport
 
 # application modules
 from peptidesetmanager import PeptideSetManager
@@ -90,12 +92,30 @@ class DATimporter:
         delta = int(data[0][2])
         data = hdf.hdf.getDataEqual('/%s/config' % hdf.importPath, 'parameter', 'minhooklength')
         minLength = int(data[0][2])
+        decoyhitidentifier = hdf.hdf.getDataEqual('/%s/config' % hdf.importPath, 'parameter', 'decoyhitidentifier')
+        decoysearchfromstart = hdf.hdf.getDataEqual('/%s/config' % hdf.importPath, 'parameter', 'decoysearchfromstart')
+        decoyreplacementstring = hdf.hdf.getDataEqual('/%s/config' % hdf.importPath, 'parameter', 'decoyreplacementstring')
+
+        # add information about how decoy hits are made identifiable
+
+        try:
+            self.setsManager.decoyhitidentifiers.add(decoyhitidentifier[0][2])
+            self.setsManager.decoyreplacementstring = decoyreplacementstring[0][2]
+            if decoysearchfromstart[0][2] == 'True' or decoysearchfromstart[0][2] == '1':
+                self.setsManager.decoysearchfromstart = 1
+        except:
+            print 'problem trying to set decoyhitidentifer data: setting to default of ###REV###'
+            self.setsManager.decoyhitidentifiers.add('###REV###')
+            self.setsManager.decoysearchfromstart = 0
+            self.setsManager.decoyreplacementstring = ''
+
         hdf.hdf.close()
 
         # read the new peptides from HDF5 and combine them with the existing data
         seq2acc = hdf.readSeq2accTable()
-        self.setsManager.proteinhitdata.update(hdf.readProteinTable())
-        self.setsManager.addSequenceData(seq2acc)
+        proteins = hdf.readProteinTable()
+        self.setsManager.proteinhitdata.update(proteins)
+        self.setsManager.addSequenceData(seq2acc, proteins)
         allpeptides = hdf.readPeptides()
         self.setsManager.setFDRData(allpeptides)
 
@@ -126,6 +146,10 @@ class DATimporter:
         logger.log.info('Calculating peptideSet QC values')
 
         self.setsManager.calcPeptideSetsQC(self.importData)
+        if cfgGeneral['groupbygenename']:
+            # will also group proteins by shared gene name
+            self.setsManager.groupPerGene()
+
         # now calculate uniqueness using only FDR-threshold-passing peptides
         self.pep2unique = self.setsManager.calcUniqueness(peptidescoreatthreshold)
         self.setsManager.calcProteinFDR()
@@ -134,7 +158,6 @@ class DATimporter:
     def updateHDF5(self):
         """
         @brief controls the updating of the data to the hdf5 results file
-
         @return finalMessage <string>: constructed from the protein data this is the RESULT stored in the DB
         """
         pep2unique = self.pep2unique
@@ -178,8 +201,13 @@ class DATimporter:
                 peptides = tmp[0]
                 queryDict = tmp[1]
                 headerArray = tmp[2]
-                quanArray = tmp[3]
+                quantArray = tmp[3]
+                quantExtraArray = tmp[4]
 
+                # generate set of all spectra with quant
+                quantSpectra = set()
+                for q in quantArray:
+                    quantSpectra.add(q['spec_id'])
                 hdf.spectra_in_qc_proteins = len(peptides)
 
                 logger.log.debug('getting spectrum_ids')
@@ -191,11 +219,10 @@ class DATimporter:
                 peptide_list = []
                 quant_list = []
                 logger.log.info('collating spectrum, peptide & quant data')
-                pBar = progBar.ProgressBar(widgets=progBar.name_widgets, maxval=len(queryDict),
-                                           name='collate data').start()
+                progRep = progressReport(len(queryDict), hdfObj.hdfFilePath.stem, 'collating query data', 'queries')
                 for idx, q in enumerate(queryDict):
                     # loop round all the required spectra
-                    pBar.nextPrimary()
+                    progRep.next()
                     context = baseContext + 'query %i: Setting spectrum data' % q
                     # extract a spectrum_id from the list
                     spectrum_id += 1
@@ -204,6 +231,7 @@ class DATimporter:
                     context = baseContext + 'spectrum %i: Updating DB with spectrum data' % spec
                     # add spectrum data to spectrum_list
                     header = self.filterArrayEqual(headerArray, 'spec_id', spec)
+
                     spectrum_list.append(self.makeSpectrumDict(spectrum_id, current_sample_id, query, acqTime,
                                                                header))
 
@@ -215,11 +243,15 @@ class DATimporter:
                     # this list will hold all peptides returned from makePeptideDictList and then filter
                     # those non-rank1 equivalents based on the score of the rank 1 peptide
                     tmplist = []
+
+                    quantData = self.filterArrayEqual(quantArray, 'spec_id', spec)
+                    if len(quantData) > 0:
+                        hdf.quantified_spectra += 1
                     for pep in pepList:
                         # find the sets that the peptide belongs to and add to the peptide_list
                         sets = self.setsManager.peptide2set[pep['peptide']]
                         context = baseContext + 'spectrum %i: Creating peptide data entries for hdf5' % spec
-                        tmp, qf = self.makePeptideDictList(spectrum_id, pep, query, sets, hdf, pep2unique)
+                        tmp, qf = self.makePeptideDictList(spectrum_id, pep, query, sets, hdf, pep2unique, quantData)
                         tmplist.extend(tmp)
                         peptide_list += tmp
                         quantFound += qf
@@ -231,15 +263,20 @@ class DATimporter:
 
                     if quantMethID and quantFound:
                         # extract quantification data for the spectrum
-                        context = baseContext + 'spectrum %i: Creating quantitation data entries for DB' % spec
-                        newquant, deltas = self.makeQuantDictLists(spectrum_id, spec,  tmplist, header, quanArray, hdf)
-
+                        if len(quantExtraArray) > 0:
+                            quantExtraData = self.filterArrayEqual(quantExtraArray, 'spec_id', spec)
+                        else:
+                            quantExtraData = None
+                        context = baseContext + 'spectrum %i: Creating quantification data entries for DB' % spec
+                        newquant, deltas = self.gatherQuantData(spectrum_id, tmplist, header, quantData,
+                                                                quantExtraData, quantSource)
                         quant_list += newquant
 
                         if quantSource == 'ms2':
                             context = baseContext + 'spectrum %i: Adding reporter ion delta data' % spec
                             hdf.addReporterDeltas(deltas)
-                pBar.finish()
+                # pBar.finish()
+                progRep.endReport()
 
                 # calculate statistics
                 context = baseContext + 'Calculating statistics'
@@ -302,8 +339,11 @@ class DATimporter:
 
     @staticmethod
     def filterArrayEqual(array, column, value):
-        arrayfilter = (array[column] == value)
-        return array[arrayfilter]
+        if len(array) > 0:
+            arrayfilter = (array[column] == value)
+            return array[arrayfilter]
+        else:
+            return np.array([])
 
     @staticmethod
     def makeSpectrumDict(spectrum_id, sample_id, query, acqTime, header):
@@ -312,7 +352,7 @@ class DATimporter:
                         msms_id=query['msms_id'], query=int(query['query']),
                         neutral_mass=query['neutral_mass'], aquisitiontime=acqTime, charge_state=header[0]['charge'],
                         precursor_mz=header[0]['precmz'], start_time=header[0]['rt'],
-                        survey_id=int(header[0]['survey_spec']), parent_ion=header[0]['setmass'],
+                        survey_id=int(header[0]['survey_spec']), parent_ion=header[0]['setmass'], rt=header[0]['rt'],
                         peak_rt=header[0]['rtapex'], s2i=header[0]['s2i'], peak_fwhm=header[0]['fwhm'],
                         fragenergy=header[0]['fragenergy'], precursor_noise=header[0]['thresh'],
                         sumreporterarea=header[0]['sumreparea'], sumreporterint=header[0]['sumrepint'],
@@ -324,7 +364,7 @@ class DATimporter:
 
         return specDict
 
-    def makePeptideDictList(self, spectrum_id, pep, query, sets, hdf, pep2unique):
+    def makePeptideDictList(self, spectrum_id, pep, query, sets, hdf, pep2unique, quantData):
 
         score2fdr = self.importData.score2fdr
         try:
@@ -336,7 +376,7 @@ class DATimporter:
                        is_unique=is_unique, failed_fdr_filter=pep['failed_fdr_filter'],
                        mw=pep['mw'], da_delta=pep['da_delta'],
                        is_hook=pep['is_hook'], is_quantified=0,
-                       is_reverse_hit=0, missed_cleavage_sites=pep['missed_cleavage_sites'],
+                       is_decoy=0, missed_cleavage_sites=pep['missed_cleavage_sites'],
                        delta_seq=query['delta_seq'], ppm_error=pep['da_delta'] / pep['mw'] * 1e6,
                        delta_mod=query['delta_mod'], in_protein_inference=0,
                        fdr_at_score=score2fdr[round(pep['score'])][3])
@@ -344,11 +384,15 @@ class DATimporter:
         quantFound = 0
         # here we check that the modification relating to the quantification label is in the
         # mascot-assigned modifications
-        if quantMethID:
-            if quantMethData['mascot_name'] in mods['positional_modstring']:
+        if quantMethID and len(quantData) > 0:
+            if isNullQuant or quantMethData['mascot_name'] in mods['positional_modstring']:
                 quantFound = 1
                 pepDict['is_quantified'] = 1
-
+        elif quantData and quantSource == 'ms1':
+            quantFound = 1
+            pepDict['is_quantified'] = 1
+        logger.log.debug('isquantified is %s for peptide %s (len quantData %s) ' %
+                         (quantFound, pep['peptide'], len(quantData)))
         pepDict.update(mods)
         pepDictList = []
         for acc in sets:
@@ -356,8 +400,8 @@ class DATimporter:
             seq_start = pepSet.peptideData[pep['peptide']]['seq_start']
             seq_end = pepSet.peptideData[pep['peptide']]['seq_end']
 
-            if pepSet.is_reverse_hit:
-                pepDict['is_reverse_hit'] = 1
+            if pepSet.is_decoy:
+                pepDict['is_decoy'] = 1
             if pepDict['peptide'] in pepSet.validpeptides:
                 pepDict['in_protein_inference'] = 1
             pepDict['seq_start'] = seq_start
@@ -367,19 +411,30 @@ class DATimporter:
 
         return pepDictList, quantFound
 
-    def makeQuantDictLists(self, spectrum_id, specID, pepData, headerref, quanArray, hdf):
+    def gatherQuantData(self, spectrum_id, pepData, headerref, quantData, quantExtraData, quantSource):
+        """
+        This method gathers and prepares quant data from different sources. These data will later be used to filter
+        and select quant values based on user-supplied parameters
+        :param spectrum_id: internally generated spectrum id to which quant values will be linked
+        :param pepData: data relating to peptide sequence and associated information
+        :param headerref: data from msmsheader table (supplying data relating to original MS/MS event)
+        :param quantData: numpy array with quant data for spectrum id
+        :param quantExtraData: either numpy array or None
+        :param quantSource: which source quant data are from (MS1 or MS2)
+        :return: quantList list of dictionaries of concatenated quant-values and filterable values.
+        List is only more than one element when quant values are in more than one protein group, deltas keeps the
+        reporter ion mz deltas
+        """
         score2fdr = self.importData.score2fdr
-        quant = self.filterArrayEqual(quanArray, 'spec_id', specID)
-        # all data in this list should be based on the rank 1 peptide sequence. If there are more than one entry it's
-        # either due to more than one proteinset membership or peptide of different rank but the same score and
-        # sequence composition.
+
         pepData.sort(key=lambda x: x['rank'])
-        if len(pepData) > 1:
+        if len([x for x in pepData if x['rank'] == 1]) > 1:
             is_unique = 0
         else:
             # take lowest unique value as an approximation for true uniqueness.
             is_unique = min(p['is_unique'] for p in pepData)
         firstpep = pepData[0]
+        logger.log.debug('started gatherQuantData for %s, len(quantData) %s' % (firstpep, len(quantData)))
         score = round(firstpep['score'])
         fdr_at_score = score2fdr[score][3]
         delta_seq = firstpep['delta_seq']
@@ -388,27 +443,40 @@ class DATimporter:
 
         protein_group_nos = set([x['protein_group_no'] for x in pepData])
         deltas = []
-        if len(quant) > 0:
+        if len(quantData) > 0:
             # accumulate numbers
             s2i = headerref['s2i']
             p2t = headerref['c12'] / headerref['thresh']
-            hdf.quantified_spectra += 1
+
             if len(protein_group_nos) > 1:
-                logger.log.debug('more than one proteinset (%s) !! %s' % (str(protein_group_nos), specID))
-            # add to the hdf5results list
-            for q in quant:
+                logger.log.debug('more than one proteinset (%s) !! %s' % (str(protein_group_nos), spectrum_id))
+            # all data in quantData should be based on the rank 1 peptide sequence. If there are more than one entry
+            # it's either due to membership of  more than one proteinset or peptide of different rank but the same
+            # score and sequence composition.
+            for q in quantData:
                 for protein_group_no in protein_group_nos:
+                    least_squares = 0
+                    prior_ion_ratio = 0
+                    source = ''
+                    if 'ms1' in quantSource:
+                        quant_raw = q['inten']
+                        if quantExtraData is not None:
+                            least_squares = max(quantExtraData['max_least_squares'])
+                            prior_ion_ratio = max(quantExtraData['prior_ion_ratio_final'])
+                            source = quantExtraData['source'][0]
+                    else:
+                        quant_raw = q['area']
                     specQuantDict = dict(protein_group_no=protein_group_no, spectrum_id=spectrum_id,
                                          delta_seq=delta_seq, is_unique=is_unique,
-                                         isotopelabel_id=int(q['isolabel_id']), score=score,
-                                         quant_raw=q['area'], quant_isocorrected=q['corrected'],
-                                         quant_allcorrected=0, p2t=p2t,
+                                         isotopelabel_id=int(q['isolabel_id']), score=firstpep['score'],
+                                         quant_raw=quant_raw, quant_isocorrected=q['corrected'],
+                                         quant_allcorrected=q['corrected'], p2t=p2t,
                                          peptide_length=peptide_length, s2i=s2i,
-                                         in_quantification_of_protein=0, fdr_at_score=fdr_at_score)
-
+                                         in_quantification_of_protein=0, fdr_at_score=fdr_at_score,
+                                         least_squares=least_squares, prior_ion_ratio=prior_ion_ratio,
+                                         ms1source=source)
                     quantList.append(specQuantDict.copy())
                 deltas.append(q['mzdiff'])
-
         return quantList, deltas
 
 
@@ -433,16 +501,21 @@ if __name__ == '__main__':
         logFile = logPath.joinpath(logParam['logfile'])
 
         logger = Logger(logFile, logParam['loglevel'], logParam['screenlevel'], True)
-        logger.setProtInferanceLogs()
+        logger.setProtInferenceLogs()
 
         if resultfile.exists():
             resultfile.unlink()
         expID = None
 
         quantMethID = cfg.parameters['runtime']['quantmethod_id']
+        isNullQuant = False
         if quantMethID:
             quantMethData = QuantMethods().getMethodByID(quantMethID)
             quantSource = quantMethData['source']
+            for id in quantMethData['quantmasses']:
+                for isotope in quantMethData['quantmasses'][id]:
+                    if isotope['mass'] == 0:
+                        isNullQuant = True
         else:
             quantMethData = {}
             quantSource = ''
@@ -472,7 +545,7 @@ if __name__ == '__main__':
         logger.log.info(msg)
         searchDict = {}
         for idx, hdf5file in enumerate(searches):
-            searchData = {}
+            searchData = dict()
             searchData['hdf5name'] = hdf5file
             searchData['archivepath'] = cfg.parameters['runtime']['datadir']
             fullPath = searchData['archivepath']

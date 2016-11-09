@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -19,7 +19,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 # python libraries
@@ -51,11 +51,11 @@ class QuantMethods:
             for key in meth:
                 if key in ['__name__']:
                     continue
-                elif key in ['meth_id', 'batch_id', 'num_isotopes']:
+                elif key in ['method_id', 'batch_id', 'num_isotopes']:
                     method[key] = int(meth[key])
-                elif key in ['heavy_isotopes']:
+                elif key in ['hyperplexed', 'heavy_isotopes']:
                     method[key] = eval(meth[key])
-                elif key in ['hyperplexed', 'xic_only']:
+                elif key in ['xic_only']:
                     if meth[key].lower() == 'yes' or meth[key] == '1' or meth[key] == 'True':
                         method[key] = True
                     else:
@@ -67,18 +67,18 @@ class QuantMethods:
                     except ValueError:
                         method[key] = meth[key]
 
-            self.methodsByID[method['meth_id']] = copy.deepcopy(method)
-            self.methodsByName[method['meth_name'].upper()] = copy.deepcopy(method)
+            self.methodsByID[method['method_id']] = copy.deepcopy(method)
+            self.methodsByName[method['method_name'].upper()] = copy.deepcopy(method)
 
-    def getMethodByID(self, meth_id):
-        if meth_id in self.methodsByID:
-            return self.methodsByID[meth_id]
+    def getMethodByID(self, method_id):
+        if method_id in self.methodsByID:
+            return self.methodsByID[method_id]
         else:
             return None
 
-    def getMethodByName(self, meth_name):
-        if meth_name in self.methodsByName:
-            return self.methodsByName[meth_name]
+    def getMethodByName(self, method_name):
+        if method_name in self.methodsByName:
+            return self.methodsByName[method_name]
         else:
             return None
 

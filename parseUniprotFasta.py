@@ -1,10 +1,10 @@
 """This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -21,7 +21,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here:
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 import sys
@@ -42,7 +42,7 @@ for line in fh:
         description = items[2]
         if rg_gene.search(description):
             gene_name = rg_gene.search(description).group(1)
-            if proteinid.startswith('DD') or proteinid.startswith('###REV###') or proteinid.startswith('###RND###'):
+            if proteinid.startswith('DD') or proteinid.find('###REV###') > -1 or proteinid.find('###RND###') > -1:
                 gene_name = '###%s###' % gene_name
         else:
             gene_name = 'NA'

@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -18,7 +18,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 
@@ -85,13 +85,13 @@ class IonProcessing:
         return
 
     def deisotope(self, header, ions):
-        '''
+        """
         @brief removes 13C isotopes from the MS/MS spectrum
         @param header <np.array>: containing the spectrum header data
         @param ions <np.array>: containing the ion data
         @return filtered <np.array>: filtered data
         @return removed <integer>: the number of ions removed from the spectrum
-        '''
+        """
         neutron = self.cfg.parameters['general']['neutron']
 
         removed = 0
@@ -157,7 +157,7 @@ class IonProcessing:
                     self.log.debug('header %s mz %s deconv %s' % (header['spec_id'], ion['mz'], deconv))
                     parentmass = header['precmz'] * header['charge']
                     self.log.debug('parentmass %s' % parentmass)
-                    if deconv > parentmass and parentmass > 0:
+                    if deconv > parentmass > 0:
                         ion['inten'] = 0
                     else:
                         ion['mz'] = deconv

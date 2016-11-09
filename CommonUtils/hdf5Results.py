@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -18,12 +18,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 
 """
 
 from hdf5Base import hdf5Base
-
+import sys
 
 class HDF5Results:
     def __init__(self, hdfFilePath):
@@ -58,7 +58,7 @@ class HDF5Results:
             if self.hdf.hasTable('/%s' % t[0]):
                 self.hdf.createTable('/', t[0], t[1], delete=True)
         if not self.hdf.hasTable('/configparameters'):
-            self.hdf.createTable('/', 'configparameters', 'ProcessingParameters')
+            self.hdf.createTable('/', 'configparameters', 'ResultProcessingParameters')
 
     def createIndexes(self):
         """
@@ -74,6 +74,27 @@ class HDF5Results:
         hdf.indexTable('/peptide', ['peptide_id', 'spectrum_id'])
         hdf.indexTable('/proteinhit', ['protein_group_no', 'protein_id'])
         hdf.indexTable('/proteinquant', ['protein_group_no'])
+
+    def updateProteinHitTop3(self, top3data):
+        hdf = self.hdf
+        phitref = hdf.getTable('/proteinhit')
+        for row in phitref:
+            protein_group_no = row['protein_group_no']
+            top3value = top3data[protein_group_no]
+            row['top3'] = top3value
+            row.update()
+        phitref.flush()
+
+    def updatePeptideTop3(self, top3peptoupdate):
+        hdf = self.hdf
+        pepref = hdf.getTable('/peptide')
+        for row in pepref:
+            protein_group_no = row['protein_group_no']
+            top3peps = top3peptoupdate[protein_group_no]
+            if row['peptide'] in top3peps:
+                row['in_top3'] = 1
+                row.update()
+        pepref.flush()
 
     def writeSample(self, summary):
         write = []
@@ -105,6 +126,7 @@ class HDF5Results:
                               precursor_mz=data['precursor_mz'],
                               s2i=data['s2i'],
                               p2t=data['precursor_area'] / data['precursor_noise'],
+                              rt=data['rt'],
                               survey_id=data['survey_id'],
                               start_time=data['start_time'],
                               peak_rt=data['peak_rt'],
@@ -131,11 +153,13 @@ class HDF5Results:
                               p2t=data['p2t'],
                               fdr_at_score=data['fdr_at_score'],
                               in_quantification_of_protein=data['in_quantification_of_protein'],
+                              least_squares=data['least_squares'],
+                              prior_ion_ratio=data['prior_ion_ratio'],
+                              ms1source=data['ms1source']
                               ))
         return self.hdf.appendRows('/specquant', write)
 
     def writePeptide(self, peptides):
-
         write = []
         for data in peptides:
             write.append(dict(peptide_id=data['peptide_id'],
@@ -158,7 +182,7 @@ class HDF5Results:
                               is_duplicate=data['is_duplicate'],
                               is_first_use_of_sequence=data['is_first_use_of_sequence'],
                               is_unique=data['is_unique'],
-                              is_reverse_hit=data['is_reverse_hit'],
+                              is_decoy=data['is_decoy'],
                               is_quantified=data['is_quantified'],
                               failed_fdr_filter=data['failed_fdr_filter'],
                               in_protein_inference=data['in_protein_inference'],
@@ -173,9 +197,9 @@ class HDF5Results:
 
         for score, data in fdrdata.iteritems():
             write.append(dict(score=score,
-                              forward_hits=data[0],
-                              reverse_hits=data[1],
-                              true_spectra=data[2],
+                              target_hits=data[0],
+                              decoy_hits=data[1],
+                              true_hits=data[2],
                               global_fdr=data[3],
                               local_fdr=data[4],
                               data_type=data_type))
@@ -196,7 +220,7 @@ class HDF5Results:
                               hssm=data['hssm'],
                               hookscore=data['hookscore'],
                               upm=data['upm'],
-                              is_reverse_hit=data['is_reverse_hit'],
+                              is_decoy=data['is_decoy'],
                               protein_fdr=data['protein_fdr'],
                               max_score=data['max_score']
                               ))
@@ -248,7 +272,7 @@ class HDF5Results:
 
         return returndata
 
-    def getMS2Data(self):
+    def getQuantData(self):
         hdf = self.hdf
         tablePath = '/specquant'
         ms2dataref = hdf.getTable(tablePath)
@@ -315,37 +339,40 @@ class HDF5Results:
         protdata = hdf.getDataGeneral(tablePath, whereclause)
         return protdata
 
-    def updatein_quantification_of_protein(self, validspectra):
+    def updatein_quantification_of_protein(self, spectra, is_quantified_value):
         """
-        s2icorrecteddata
-        :param s2icorrecteddata:is a dictionary of dictionaries, where keys are spectrum ids the second level is
-          indexed by isotope label id
+        updates the value of in_quantification_of_protein to value given by is_quantified_value
+        ie for including or excluding a spectrum from quantification
+        :param spectra:  list of spectrum ids to update
+        :param is_quantified_value: value to which one should set the quantification of spectrum id
+
         :return:
         """
 
         hdf = self.hdf
         tablePath = '/specquant'
         specquantref = hdf.getTable(tablePath)
+        refcounter = len(specquantref)
         for row in specquantref:
             spectrum_id = row['spectrum_id']
-            if spectrum_id in validspectra:
-                row['in_quantification_of_protein'] = 1
+            if spectrum_id in spectra:
+                row['in_quantification_of_protein'] = is_quantified_value
                 row.update()
         specquantref.flush()
 
     def getQuantifiedPeptideCounts(self):
         hdf = self.hdf
         tablePath = '/peptide'
-        potentially_quantfied_peptides = hdf.getTable(tablePath)
+        whereclause = 'is_quantified== 1'
+        potentially_quantfied_peptides = hdf.getDataGeneral(tablePath, whereclause)
         protein_group_no2quantpep = {}
-        for data in potentially_quantfied_peptides.iterrows():
-            if data['is_quantified'] == 1:
-                if not data['failed_fdr_filter']:
-                    protein_group_no = data['protein_group_no']
-                    try:
-                        protein_group_no2quantpep[protein_group_no] += 1
-                    except KeyError:
-                        protein_group_no2quantpep[protein_group_no] = 1
+        for data in potentially_quantfied_peptides:
+            if not data['failed_fdr_filter']:
+                protein_group_no = data['protein_group_no']
+                try:
+                    protein_group_no2quantpep[protein_group_no] += 1
+                except KeyError:
+                    protein_group_no2quantpep[protein_group_no] = 1
         return protein_group_no2quantpep
 
     def getProteinQuantData(self):
@@ -382,11 +409,17 @@ class HDF5Results:
 
         return returndict, reference_label
 
-    def addConfigParameters(self, cfgParams, prePost, controller):
+    def addConfigParameters(self, cfgParams, prePost, controller, sectionSkip=[]):
 
+        if isinstance(sectionSkip, str):
+            sectionSkip = [sectionSkip]
+        elif not isinstance(sectionSkip, list):
+            sectionSkip = list(sectionSkip)
+
+        sectionSkip += ['runtime', 'logging']
         dataList = []
         for section in cfgParams:
-            if section in ['runtime', 'logging']:
+            if section in sectionSkip:
                 continue
             for param in cfgParams[section]:
                 if param in ['paramconversion', '__name__']:
@@ -395,3 +428,39 @@ class HDF5Results:
                                      value=str(cfgParams[section][param])))
         if dataList:
             self.hdf.appendRows('/configparameters', dataList)
+
+    def getPeptideDataforTop3(self):
+        hdf = self.hdf
+        returndict = {}
+        tablePath = '/peptide'
+        pepdataref = hdf.getTable(tablePath)
+        for row in pepdataref:
+            protein_group_no = row['protein_group_no']
+            if protein_group_no not in returndict:
+                returndict[protein_group_no] = {}
+            peptide = row['peptide']
+            positional_modstring = row['positional_modstring']
+            rank = row['rank']
+            score = row['score']
+            spectrum_id = row['spectrum_id']
+            is_unique = row['is_unique']
+            failed_fdr_filter = row['failed_fdr_filter']
+
+            if rank == 1 and is_unique and not failed_fdr_filter:
+
+                try:
+                    returndict[protein_group_no][spectrum_id] = (peptide, positional_modstring, score)
+                except KeyError:
+                    returndict[protein_group_no][spectrum_id] = (peptide, positional_modstring, score)
+
+        return returndict
+
+    def getH5DFQuantMeth(self):
+        isotopes = self.hdf.readTable('/isotopes')
+        if len(isotopes) == 0:
+            return 0
+        else:
+            return isotopes[0]['method_id']
+
+
+

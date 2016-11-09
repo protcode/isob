@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -19,12 +19,13 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/cellzome/isobarquant
+https://github.com/protcode/isob
 """
 
 # python libraries
 import sys
 import os
+import multiprocessing
 
 from pathlib import Path
 
@@ -33,31 +34,47 @@ from pathlib import Path
 sys.path.insert(0, '..')
 from CommonUtils.ConfigManager import ConfigManager
 from CommonUtils.LoggingManager import Logger
+from CommonUtils.tools import MasterQueue
 
 # application libraries
 
 
-def runPyMSsafe():
-    cmdline = 'python "%s/pyMSsafe.py" %s' % (pyMSsafeDir, formatArgumentString(rawFile, 0))
-    logger.log.debug(cmdline)
-    os.chdir(pyMSsafeAppDir)
-    os.system(cmdline)
+class RunPymssafe:
+    def execute(self, rundata):
+        rawFile, runDir, logger = rundata
+        cmdline = 'python "pyMSsafe.py" %s' % formatArgumentString(rawFile, 0)
+        logger.log.debug(cmdline)
 
-    ret = fetchError(rawFile.parent.joinpath(rawFile.stem + '.error'))
-    ret['cmdline'] = cmdline
-    return ret
+        pyMSsafeAppDir = runDir / Path('pyMSsafe')
+
+        os.chdir(str(pyMSsafeAppDir.resolve()))
+
+        os.system(cmdline)
+        ret = fetchError(rawFile.parent.joinpath(rawFile.stem + '.error'))
+        ret['cmdline'] = cmdline
+        # change back to runDir when done
+        os.chdir(str(Path(runDir).resolve()))
+        # we probably don't need this as the return codes are not kept
+        ret['cmdline'] = cmdline
+        return ret
 
 
-def runMGFcreation():
-    cmdline = 'python "%s/mgf.py" %s' % (pyMSsafeDir, formatArgumentString(rawFile, True))
-    logger.log.debug(cmdline)
-    os.chdir(pyMSsafeAppDir)
-    os.system(cmdline)
 
-    ret = fetchError(rawFile.parent.joinpath(rawFile.stem + '.error'))
-    ret['cmdline'] = cmdline
+class RunCreateMGF():
+    def execute(self, rundata):
+        rawFile, runDir, logger = rundata
+        cmdline = 'python "mgf.py" %s' % formatArgumentString(rawFile, 1)
+        logger.log.debug(cmdline)
 
-    return ret
+        pyMSsafeAppDir = runDir / Path('pyMSsafe')
+        os.chdir(str(pyMSsafeAppDir.resolve()))
+
+        os.system(cmdline)
+
+        ret = fetchError(rawFile.parent.joinpath(rawFile.stem + '.error'))
+        # we probably don't need this as the retun codes are not kept
+        ret['cmdline'] = cmdline
+        return ret
 
 
 def fetchError(errorFile):
@@ -156,33 +173,50 @@ if __name__ == '__main__':
     pyMSsafeDir = Path('./pyMSsafe').absolute()
     ret = dict(code=1)
     cwd = os.getcwd()
+    RunPymssafeJobs = MasterQueue
     for rawFile, idx in rawFileList:
         print
         logger.log.info('---- NEW FILE ----')
         logger.log.log(logger.PROCESS, 'starting %i/%i: processing %s' % (idx, len(rawFileList), rawFile.name))
+        RunPymssafeJobs.todoList.put_nowait((rawFile, os.path.dirname(os.path.abspath(__file__)), logger))
+    available_threads = cfg.parameters['general']['thread_count']
+    # if user supplies more threads than available CPUs, reset
+    if available_threads > multiprocessing.cpu_count():
+        available_threads = multiprocessing.cpu_count()
+    my_threads = [RunPymssafeJobs() for i in range(available_threads)]
 
-        # run pyMSsafe process
-        ret = runPyMSsafe()
 
-        if ret['code'] == 0:
-            logger.log.info('Finished pyMSsafe succesfully for %s' % rawFile.name)
+    for thread in my_threads:
+        thread.add_job(RunPymssafe())
+        thread.setDaemon(True)
+        thread.start()
 
-            # run mgf creation process
-            ret = runMGFcreation()
-            if ret['code'] == 0:
-                logger.log.info('Finished MGFcreation succesfully for %s' % rawFile.name)
-            else:
-                logger.log.warning('MGFcreation failed for %s: %s' % (rawFile.name, ret['error']))
-                logger.log.warning('cmd: %s' % ret['cmdline'])
-        else:
-            logger.log.warning('pyMSsafe failed for %s: %s' % (rawFile.name, ret['error']))
-            logger.log.warning('cmd: %s' % ret['cmdline'])
+    for thread in my_threads:
+        thread.join()
+    #  will wait for all threads to finish before continuing:
+    RunPymssafeJobs.todoList.join()
 
-        os.chdir(cwd)
-        logger.log.info('finished %i/%i: processing %s' % (idx, len(rawFileList), rawFile.name))
+    RunCreateMGFJobs = MasterQueue
+    for rawFile, idx in rawFileList:
         print
+        logger.log.info('---- NEW FILE ----')
+        logger.log.log(logger.PROCESS, 'mgf creation of %i/%i: processing %s' % (idx, len(rawFileList), rawFile.name))
+        RunCreateMGFJobs.todoList.put_nowait((rawFile, os.path.dirname(os.path.abspath(__file__)), logger))
 
-    if ret['code'] == 0:
-        logger.log.log(logger.PROCESS, 'Finished processing %i files' % len(rawFileList))
-    else:
-        logger.log.warning('Errors detected in processing.')
+    available_threads = cfg.parameters['general']['thread_count']
+    # if user supplies more threads than available CPUs, reset
+    if available_threads > multiprocessing.cpu_count():
+        available_threads = multiprocessing.cpu_count()
+    my_mgf_threads = [RunCreateMGFJobs() for i in range(available_threads)]
+
+    for thread in my_mgf_threads:
+        thread.add_job(RunCreateMGF())
+        thread.setDaemon(True)
+        thread.start()
+
+    for thread in my_mgf_threads:
+        thread.join()
+    RunCreateMGFJobs.todoList.join()
+
+    logger.log.log(logger.PROCESS, 'Finished processing %i files' % len(rawFileList))
+

@@ -1,10 +1,10 @@
 """This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -18,14 +18,18 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here:
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 
 import os
 import sys
 from pathlib import Path
+import numpy as np
+np.seterr(all='ignore')  # seterr to ignore
+import re
 
+RE_MOD = re.compile('(.+):(\d+)$')
 
 from CommonUtils.hdf5Results import HDF5Results
 from CommonUtils.ConfigManager import ConfigManager
@@ -33,6 +37,7 @@ from CommonUtils.LoggingManager import Logger
 from CommonUtils.tools import Misc
 import CommonUtils.progressbar as progBar
 import CommonUtils.QuantMethodHandler as quantHandler
+from CommonUtils.progressReport import progressReport
 
 
 def getUniprotData():
@@ -76,21 +81,23 @@ def makemodificationsstring(positional_modstring, peptide):
     pmods = positional_modstring.split(';')
     for pmod in pmods:
         try:
-            mod, pos = pmod.split(':')
+            if RE_MOD.search(pmod):
+                mod = RE_MOD.search(pmod).group(1)
+                pos = RE_MOD.search(pmod).group(2)
+            peptidepos = int(pos) - 1
+            if peptidepos < 0:
+                residue = 'N-term'
+                modificdations += template_term % (mod, residue)
+
+            elif peptidepos > len(peptide):
+                residue = 'C-term'
+                modificdations += template_term % (mod, residue)
+            else:
+                residue = peptide[peptidepos]
+                modificdations += template % (mod, residue, pos)
         except ValueError:
             print 'error processing positional modstring %s' % positional_modstring
             return 'n/d'
-        peptidepos = int(pos) - 1
-        if peptidepos < 0:
-            residue = 'N-term'
-            modificdations += template_term % (mod, residue)
-
-        elif peptidepos > len(peptide):
-            residue = 'C-term'
-            modificdations += template_term % (mod, residue)
-        else:
-            residue = peptide[peptidepos]
-            modificdations += template % (mod, residue, pos)
     return modificdations
 
 
@@ -98,28 +105,46 @@ def preparePeptideData(pep, proteins, fdr_data, specs, quant):
     protein = proteins[pep['protein_group_no']]
     specID = pep['spectrum_id']
     fdr_at_score = fdr_data[round(pep['score'])]
+    try:
+        in_top3 = pep['in_top3']
+    except KeyError:
+        in_top3 = 'NA'
+    delta_mod = round(pep['delta_mod']) if pep['delta_mod'] > -1 else 'NA'
+
     peptideData = dict(sequence=pep['peptide'],
-                           rank=pep['rank'],
-                           mw=pep['mw'],
-                           ppm_error=pep['ppm_error'],
-                           is_unique=pep['is_unique'], score=pep['score'],
-                           failed_fdr_filter=pep['failed_fdr_filter'],
-                           protein_group_no=pep['protein_group_no'],
-                           protein_ids=protein,
-                           in_protein_inference=pep['in_protein_inference'],
-                           fdr_at_score=fdr_at_score,
-                           seq_start=pep['seq_start'],
-                           seq_end=pep['seq_end'],
-                           positional_modstring=pep['positional_modstring'])
+                       rank=pep['rank'],
+                       mw=pep['mw'],
+                       ppm_error=pep['ppm_error'],
+                       is_unique=pep['is_unique'], score=pep['score'],
+                       is_decoy=pep['is_decoy'],
+                       failed_fdr_filter=pep['failed_fdr_filter'],
+                       protein_group_no=pep['protein_group_no'],
+                       protein_ids=protein,
+                       in_protein_inference=pep['in_protein_inference'],
+                       fdr_at_score=fdr_at_score,
+                       delta_mod=delta_mod,
+                       in_top3=in_top3,
+                       seq_start=pep['seq_start'],
+                       seq_end=pep['seq_end'],
+                       positional_modstring=pep['positional_modstring'],
+                       prior_ion_ratio='NA',
+                       least_squares='NA',
+                       ms1source='NA'
+                       )
+
     peptideData.update(specs[specID])
 
     if peptideData['positional_modstring']:
         peptideData['modifications'] = makemodificationsstring(peptideData['positional_modstring'],
-                                                                   peptideData['sequence'])
+                                                               peptideData['sequence'])
     else:
         peptideData['modifications'] = ''
     if specID in quant:
         peptideData.update(quant[specID])
+        if {'prior_ion_ratio', 'least_squares', 'ms1source'} & set(quant[specID].keys()):
+            peptideData['prior_ion_ratio'] = quant[specID]['prior_ion_ratio']
+            peptideData['least_squares'] = quant[specID]['least_squares']
+            peptideData['ms1source'] = quant[specID]['ms1source']
     else:
         peptideData['in_quantification_of_protein'] = 0
 
@@ -139,11 +164,9 @@ def collectPeptideData(hdfObject, sample2source):
     for prot in proteinhit:
         try:
             proteins[prot['protein_group_no']].append(prot['protein_id'])
-            # it's ok to sort here as we don't expect too many protein ids for the protein group
             proteins[prot['protein_group_no']].sort()
         except KeyError:
             proteins[prot['protein_group_no']] = [prot['protein_id']]
-
     proteinhit = None
 
     # extract required spectrum data
@@ -156,6 +179,7 @@ def collectPeptideData(hdfObject, sample2source):
                                         msms_id=sp['msms_id'],
                                         charge_state=sp['charge_state'],
                                         precursor_mz=sp['precursor_mz'],
+                                        retention_time = sp['rt'],
                                         peak_intensity=sp['peak_intensity'],
                                         s2i=sp['s2i'],
                                         p2t=sp['p2t'])
@@ -165,17 +189,27 @@ def collectPeptideData(hdfObject, sample2source):
     specquant = hdf.readTable('/specquant')
     quant = {}
     usedIsotopes = set()
+    addMS1data = False
+    if set(cfg.parameters['general']['ms1params']) & set([x for x in specquant.dtype.names]):
+        addMS1data = True
     for sq in specquant:
         id = sq['spectrum_id']
         if id not in quant:
             quant[id] = dict(in_quantification_of_protein=sq['in_quantification_of_protein'])
         quant[id][sq['isotopelabel_id']] = sq['quant_allcorrected']
+        if addMS1data:
+            quant[id]['prior_ion_ratio'] = sq['prior_ion_ratio']
+            quant[id]['least_squares'] = sq['least_squares']
+            quant[id]['ms1source'] = sq['ms1source']
         usedIsotopes.add(sq['isotopelabel_id'])
+
     usedIsotopes = sorted(usedIsotopes)
     outString = 'protein_group_no\tprotein_id\tsequence\tmodifications\tmw'
-    outString += '\tprecursor_mz\tcharge_state\tppm_error\tscore\tfdr_at_score\trank\tmsms_id\tsource_file'
-    outString += '\tpeak_intensity\ts2i\tp2t\tis_unique\tin_quantification_of_protein\tin_protein_inference'
-    outString += '\tseq_start\tseq_end'
+    outString += '\tprecursor_mz\tcharge_state\tppm_error\tscore\tfdr_at_score\tdelta mod\trank\tmsms_id\tsource_file'
+    outString += '\tretention time\tpeak_intensity\ts2i\tp2t\tis_unique\tin_quantification_of_protein\tin_protein_inference'
+    outString += '\tin_top3\tseq_start\tseq_end\tis_decoy'
+    if addMS1data:
+        outString += '\tprior ion ratio\tleast squares\tms1 source'
     if usedIsotopes:
         isotope_data = dict([(str(i), i) for i in usedIsotopes])
         try:
@@ -194,16 +228,21 @@ def collectPeptideData(hdfObject, sample2source):
     logger.log.info('loading peptide data')
     out_string_template = '%(protein_group_no)i\t%(proteins)s\t%(sequence)s\t%(modifications)s\t%(mw)f\t'
     out_string_template += '%(precursor_mz)f\t%(charge_state)i\t%(ppm_error)f\t%(score).0f\t%(fdr_at_score).3f\t'
-    out_string_template += '%(rank)i\t%(msms_id)i\t%(source_file)s\t%(peak_intensity)f\t%(s2i)f\t%(p2t)f\t'
+    out_string_template += '%(delta_mod)s\t%(rank)i\t%(msms_id)i\t%(source_file)s\t%(retention_time)f\t'
+    out_string_template += '%(peak_intensity)f\t%(s2i)f\t%(p2t)f\t'
     out_string_template += '%(is_unique)i\t%(in_quantification_of_protein)i\t'
-    out_string_template += '%(in_protein_inference)f\t%(seq_start)s\t%(seq_end)s'
+    out_string_template += '%(in_protein_inference)f\t%(in_top3)s\t%(seq_start)s\t%(seq_end)s\t%(is_decoy)s'
+    if addMS1data:
+        out_string_template += '\t%(prior_ion_ratio)s\t%(least_squares)s\t%(ms1source)s'
     fdr_data = dict([(x['score'], x['global_fdr']) for x in hdf.readTable('/fdrdata') if x['data_type'] == 'peptide'])
     peptidetable = hdf.getTable('/peptide')  # get reference to peptide table on disk
     current_pepgroupid = None
     tmplist = []
-    pBar = progBar.ProgressBar(widgets=progBar.name_widgets, maxval=len(peptidetable), name='load peptides').start()
+
+    progRep = progressReport(len(peptidetable), hdf.filePath.stem, 'load peptides', 'peptides')
     for idx, p in enumerate(peptidetable.itersorted('protein_group_no')):
-        pBar.update(idx)
+        # pBar.update(idx)
+        progRep.report(idx)
         if current_pepgroupid == p['protein_group_no']:
             tmplist.append(preparePeptideData(p, proteins, fdr_data, specs, quant))
         else:
@@ -220,7 +259,8 @@ def collectPeptideData(hdfObject, sample2source):
                     f_out.write(outString + '\n')
             tmplist = [preparePeptideData(p, proteins, fdr_data, specs, quant)]
         current_pepgroupid = p['protein_group_no']
-    pBar.finish()
+
+    progRep.endReport()
     # not to forget the last protein groups data in tmplist
     if tmplist:
         tmplist = sorted(tmplist, key=lambda y: y['seq_start'])
@@ -251,11 +291,11 @@ def collectProteinData(hdfObject):
         usedIsotopes = sorted(allquantdata.values()[0].keys())
     except:
         usedIsotopes = []
-    translatedData = {}
+    translatedData = dict()
     translatedData[0] = ''
     referenceid = int(referenceid)
-
     essentialUPdata = getUniprotData()
+
     if usedIsotopes:
         translatedData = dict([(i, i) for i in usedIsotopes])
         try:
@@ -265,7 +305,6 @@ def collectProteinData(hdfObject):
                 translatedData[id] = data[0]['name']
         except:
             print 'error getting label name data, just use .hdf5 file content'
-
     for prot in proteinhit:
         protein_id = prot['protein_id']
         ssm = prot['ssm']
@@ -275,8 +314,14 @@ def collectProteinData(hdfObject):
         except KeyError:
             pqssm = 0
 
-        is_reverse_hit = prot['is_reverse_hit']
+        is_decoy = prot['is_decoy']
         protein_fdr = prot['protein_fdr']
+        try:
+            top3 = prot['top3']
+        except IndexError:
+            top3 = np.nan
+        if np.isnan(top3):
+            top3 = 'NA'
         try:
             quantdata = allquantdata[protein_group_no]
             qupm = max([x['qupm'] for x in quantdata.values()])
@@ -315,9 +360,10 @@ def collectProteinData(hdfObject):
             proteins[protein_group_no]['qssm'] = qssm
             proteins[protein_group_no]['upm'] = upm
             proteins[protein_group_no]['fqssm'] = pqssm - qssm
-            proteins[protein_group_no]['is_reverse_hit'].add(is_reverse_hit)
+            proteins[protein_group_no]['is_decoy'].add(is_decoy)
             proteins[protein_group_no]['protein_fdr'] = protein_fdr
             proteins[protein_group_no]['max_score'] = max_score
+            proteins[protein_group_no]['top3'] = top3
         except KeyError:
             proteins[protein_group_no] = {}
             proteins[protein_group_no]['protein_id'] = [protein_id]
@@ -331,11 +377,12 @@ def collectProteinData(hdfObject):
             proteins[protein_group_no]['qssm'] = qssm
             proteins[protein_group_no]['qupm'] = qupm
             proteins[protein_group_no]['fqssm'] = pqssm - qssm
-            proteins[protein_group_no]['is_reverse_hit'] = {is_reverse_hit}
+            proteins[protein_group_no]['is_decoy'] = {is_decoy}
             proteins[protein_group_no]['protein_fdr'] = protein_fdr
             proteins[protein_group_no]['max_score'] = max_score
+            proteins[protein_group_no]['top3'] = top3
     f_out = open(str(outputFile), 'w')
-    outString = 'protein_group_no\tprotein_id\tdescription\tgene_name\tmw\tprotein_fdr\tmax_score\ttotal_score\t'
+    outString = 'protein_group_no\tprotein_id\tdescription\tgene_name\tmw\ttop3\tprotein_fdr\tmax_score\ttotal_score\t'
     outString += 'ssm\tupm\tfqssm\tqssm\tqupm\n'
     quantfieldnames = ['signal_sum', 'rel_fc', 'delta_conf']
     if usedIsotopes:
@@ -370,7 +417,7 @@ def collectProteinData(hdfObject):
             proteindata['description'] = sorteddescdata
             proteindata['mw'] = sortedmwdata
 
-        if ignore_reverse_hits and min(proteindata['is_reverse_hit']) == 1:
+        if ignore_reverse_hits and min(proteindata['is_decoy']) == 1:
             # do not print out the reverse hits.
             continue
 
@@ -387,12 +434,13 @@ def collectProteinData(hdfObject):
         proteindata2out['referenceid'] = translatedData[referenceid]
         quantdata = proteindata['quantdata']
         proteindata2out['protein_group_no'] = protein_group_no
-        outString = '%(protein_group_no)i\t%(protein_id)s\t%(description)s\t%(gene_name)s\t%(mw)s\t'
+        outString = '%(protein_group_no)i\t%(protein_id)s\t%(description)s\t%(gene_name)s\t%(mw)s\t%(top3)s\t'
         outString += '%(protein_fdr)s\t%(max_score).0f\t%(total_score).0f\t%(ssm)s\t'
         outString += '%(upm)s\t%(fqssm)s\t%(qssm)s\t%(qupm)s\t%(referenceid)s'
         outString = outString % proteindata2out
         for idx in quantfieldnames:
             for iso in usedIsotopes:
+
                 try:
                     data = str(quantdata[iso][idx]).replace('-1.0', 'NA')
                     outString += '\t%s' % data
@@ -445,15 +493,15 @@ def collectSummaryData(hdfObject):
     f_out.write('%s\n' % '\t'.join(outList))
 
     # create separate table for the protein numbers
-    countForward = 0
-    countReverse = 0
+    countTarget = 0
+    countDecoy = 0
     for i in range(6):
-        countForward += int(combinedData['%i hooks forward_protein_hits' % i])
-        countReverse += int(combinedData['%i hooks reverse_protein_hits' % i])
+        countTarget += int(combinedData['%i hooks target_protein_hits' % i])
+        countDecoy += int(combinedData['%i hooks decoy_protein_hits' % i])
 
     f_out.write('\n\ntype\tprotein_hits\n')
-    f_out.write('forward\t%i\n' % countForward)
-    f_out.write('reverse\t%i\n' % countReverse)
+    f_out.write('target\t%i\n' % countTarget)
+    f_out.write('decoy\t%i\n' % countDecoy)
 
     # create a new table for peptide FDR levels
     fdr = hdf.readTable('/fdrdata')

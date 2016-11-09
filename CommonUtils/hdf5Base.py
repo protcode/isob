@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -19,10 +19,11 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 
 """
-
+import numpy as np
+from numpy.lib import recfunctions as rfn
 import tables as tables
 from tables.nodes import filenode
 from pathlib import Path
@@ -262,6 +263,23 @@ class hdf5Base:
             self.tableTOC[tablePath]._f_remove()
             del self.tableTOC[tablePath]
 
+    def renameTable(self, group, oldName, newName):
+        """
+        @brief renames an existing table table.  if the table already exists then the old version will be deleted
+        @param tablePath <string>: the path name of the new table
+        """
+        oldTablePath = '/%s/%s' % (group, oldName)
+        newTablePath = '/%s/%s' % (group, newName)
+        # First find if the table already exists
+        if oldTablePath in self.tableTOC:
+            # table exists, we rename it
+            table = self.tableTOC[oldTablePath]
+            table._f_rename(newName)
+
+            # update the tableTOC entries
+            del self.tableTOC[oldTablePath]
+            self.tableTOC[newTablePath] = table
+
     def indexTable(self, tablePath, columnsList):
 
         # test that the table is present
@@ -280,28 +298,8 @@ class hdf5Base:
                 table.flush()
             else:
                 raise ExHa.HDF5consistancyError('Table %s does not have column %s' % (tablePath, col))
+
         return dict(code=0)
-
-    def completely_sorted_index_table(self, table_path, col):
-        # test that the table is present
-        if table_path not in self.tableTOC:
-            raise ExHa.HDF5consistancyError('Table %s does not exist' % table_path)
-        else:
-            # create the table object for data appending
-            table = self.tableTOC[table_path]
-
-        # flush the table data then create the indexes
-        table.flush()
-        if col in table.colnames:
-            col_instance = table.colinstances[col]
-            print 'creating sorted index on %s' % col
-
-            col_instance.createCSIndex()
-            table.flush()
-        else:
-            raise ExHa.HDF5consistancyError('Table %s does not have column %s' % (table_path, col))
-        return dict(code=0)
-
 
     def appendRows(self, tablePath, dataList, keyList=None):
         """
@@ -360,6 +358,49 @@ class hdf5Base:
 
         # flush the buffer
         table.flush()
+        return
+
+    def completely_sorted_index_table(self, table_path, col):
+        # test that the table is present
+        if table_path not in self.tableTOC:
+            raise ExHa.HDF5consistancyError('Table %s does not exist' % table_path)
+        else:
+            # create the table object for data appending
+            table = self.tableTOC[table_path]
+
+        # flush the table data then create the indexes
+        table.flush()
+        if col in table.colnames:
+            col_instance = table.colinstances[col]
+            # print 'creating sorted index on %s' % col
+
+            col_instance.createCSIndex()
+            table.flush()
+        else:
+            raise ExHa.HDF5consistancyError('Table %s does not have column %s' % (table_path, col))
+        return dict(code=0)
+
+    def updateDataInRow(self, tablePath, whereClause, changeData):
+        """
+        @brief changes specific data in a table.  All rows matching rowFilter will be changed
+        @param tablePath <string>: internal path of the table to be read.
+        @param whereClause <string>: filter conditions for the table.
+        @param changeData <dictionary>: containing new data values indexed by the column name
+        """
+
+        # test that the table is present
+        if tablePath not in self.tableTOC:
+            raise ExHa.HDF5consistancyError('Table %s does not exist' % tablePath)
+        else:
+            # create the row object for data appending
+            table = self.tableTOC[tablePath]
+
+            for row in table.where(whereClause):
+                for col in changeData:
+                    row[col] = changeData[col]
+                row.update()
+
+            table.flush()
 
     def removeRows(self, tablePath, conditions):
         """
@@ -565,3 +606,51 @@ class hdf5Base:
             return filePath
         else:
             raise ExHa.HDF5consistancyError('Table %s does not exist' % tablePath)
+
+    def checkTableAgainstDefinition(self, inTable, definition, adapt=False):
+        """
+        @brief Checks wether the columns in the numpy array 'inTable' suit those in the table definition from
+                CommonUtils/hdf5Tables. If the 'adapt' flag is set to True, missing columns will be added to the table
+                and extra columns will be removed and the adjusted table is returned. Otherwise the function returns a
+                logical value indicating whether the given numpy array suits the definition (True) or not (False).
+        @param inTable: <ndarray> numpy array to be checked and adapted if necessary
+        @param definition: <String> name of the table definition CommonUtils/hdf5Tables to check against
+        @param adapt: <logical> flag indicating whether the given numpy array shall be adapted to the definition and
+                the modified numpy array shal be returned (default=False)
+        """
+
+        suitsDefinition = True
+
+        if hasattr(hdf5Tables, definition):
+            tmpTabObj = hdf5Tables.__dict__[definition]
+        else:
+            raise ExHa.configError("Can't find table %s in CommonUtils/hdf5Tables", definition)
+
+        definedCols = tmpTabObj.columns.keys()
+        colsInTable = list(inTable.dtype.names)
+
+        extraColsInTable = list(set(colsInTable) - set(definedCols))
+        missingColsInTable = list(set(definedCols) - set(colsInTable))
+        intersect = list(set(definedCols) & set(colsInTable))
+
+        if len(extraColsInTable) > 0:
+            suitsDefinition = False
+            print "Given table '%s' has the following extra columns: %s" % (definition, ', '.join(extraColsInTable))
+            if adapt:
+                print "  -> adapting table '%s'; removing extra columns. " % definition
+                inTable = inTable[intersect]
+
+        if len(missingColsInTable) > 0:
+            suitsDefinition = False
+            print "Column(s) %s mssing in the given table '%s'" % (', '.join(missingColsInTable), definition)
+            if adapt:
+                for mcit in missingColsInTable:
+                    print "  -> adding empty column '%s'" % mcit
+                    inTable = rfn.append_fields(inTable, names=mcit,
+                                                data=np.asarray([None] * inTable.size,
+                                                                dtype=tmpTabObj.columns[mcit].dtype),
+                                                usemask=False)
+        if adapt:
+            return inTable
+        else:
+            return suitsDefinition

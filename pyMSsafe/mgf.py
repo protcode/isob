@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -18,7 +18,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 # python modules
@@ -35,6 +35,7 @@ from CommonUtils.hdf5Base import hdf5Base
 import CommonUtils.ExceptionHandler as ExHa
 import CommonUtils.progressbar as progBar
 from CommonUtils.LoggingManager import Logger
+from CommonUtils.progressReport import progressReport
 
 # pyMSsafe modules
 
@@ -90,17 +91,16 @@ class mgftools:
         self.hdf5.close()
 
     def getActivationTypes(self):
+        # simplest data for activation is the units table
+        data = self.hdf5.readTable('/rawdata/units')
 
-        data = self.hdf5.getDataEqual('/rawdata/parameters', 'parameter', 'Activation Type')
-        if len(data) == 0:
-            data = self.hdf5.getDataEqual('/rawdata/parameters', 'parameter', 'activation')
+        types = set()
+        for d in data:
+            # only need activation for spectra used for identification
+            if 'I' in d['use']:
+                types.add(d['activation'])
 
-        types = {}
-        for act in data.flat:
-            activation = act['value'].upper()
-            types[activation] = types.get(activation, 0) + 1
-
-        return types.keys()
+        return list(types)
 
     def export(self, hcdonly=0):
         """
@@ -149,14 +149,17 @@ class mgftools:
             else:
                 deconv = 0
 
-            pBar = progBar.ProgressBar(widgets=progBar.name_widgets, maxval=len(headers), name='Create .mgf').start()
+            # pBar = progBar.ProgressBar(widgets=progBar.name_widgets, maxval=len(headers), name='Create .mgf').start()
+            progRep = progressReport(len(headers), hdf.filePath.stem, 'creating mgf', 'spectra')
+
             for idx, h in enumerate(headers):
                 if hcdonly:
                     if h['fragmeth'] != 'HCD':
                         continue
                 elif not h['order'] in ident:
                     continue
-                pBar.update(idx)
+                # pBar.update(idx)
+                progRep.report(idx)
 
                 # get spectrum data
                 spec = h['spec_id']
@@ -173,7 +176,7 @@ class mgftools:
                 frag = data[0]['value']
                 try:
                     self.maxint = max(spectrum['inten'])
-                except:
+                except ValueError:
                     self.maxint = 0
 
                 # construct title values list
@@ -242,7 +245,8 @@ class mgftools:
                 if len(ionList) > 0:
                     hdf.appendRows('/rawdata/deconvions', ionList)
 
-            pBar.finish()
+            # pBar.finish()
+            progRep.endReport()
 
         except ExHa.MGFprocessingError, czEx:
             if spec:
@@ -293,7 +297,7 @@ class mgftools:
 
     def zonefilter(self, header, ions):
         """
-        @brief does the Matheus Mann filtering top x ions in a chunk of the spectrum (50 / 100 m/z)
+        @brief does the filtering top x ions in a chunk of the spectrum (50 / 100 m/z)
         @param header <np.array>: containing the spectrum header data
         @param ions <np.array>: containing the ion data
         @return filtered <np.array>: filtered data
@@ -677,13 +681,11 @@ if __name__ == '__main__':
         if hcdOnly:
             logger.log.info('Exporting HCD data only')
 
-        # for f in dataDir.files(fileFilter):
         for f in dataDir.glob(fileFilter):
             if not f.is_file():
                 # skip any directories
                 continue
 
-            # if f.name[:4] in ['6528', '1814', '2032']: continue
             mgf = mgftools(f)
             logger.log.info('Filename:     %s' % f.name)
             if hcdOnly:

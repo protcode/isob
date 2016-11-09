@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -18,7 +18,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 import math
@@ -26,7 +26,7 @@ import numpy
 from pathlib import Path
 
 
-class Processor():
+class Processor:
     """
     @brief controlls the methods required to process profile spectrum data
     """
@@ -282,7 +282,7 @@ class Processor():
                 peak = dict(top=ion, topmz=data[ion][0], topint=inten, left=0, right=0, minleft=minint)
                 thresh = peak['topint'] * edge
             elif inten < maxint * valley:
-                if maxint > minint:
+                if maxint * valley > minint:
                     p = last
 
                     while data[p][1] < thresh:
@@ -311,7 +311,6 @@ class Processor():
                 minint = inten
                 if maxima:
                     maxima[-1]['minright'] = inten
-
         return maxima
 
     @staticmethod
@@ -462,7 +461,7 @@ class IsotopeModel:
         @param cfg <object>: contains all the configuration data
         @param maxrepeats <integer>: maximum number of averagines to calculate the isotopic abundances for
         @param mininten <float>: minimum fraction of the normalised intensity for an isotope to be used
-        @param quanmeth <string>: the quantitation method used to select the correct isofile
+        @param quanmeth <string>: the quantification method used to select the correct isofile
         """
         self.deisoparam = cfg.parameters['deisotoping']
         self.maxRepeats = maxrepeats
@@ -472,7 +471,7 @@ class IsotopeModel:
         self.numlabels = self.deisoparam['num_labels']
         self.heavyIsotopes = ['C13', 'N15', 'O18', 'H2']
         if quanmeth:
-            methName = quanmeth['meth_name']
+            methName = quanmeth['method_name']
             self.isotopeNumbers = quanmeth['heavy_isotopes']
         else:
             methName = 'none'
@@ -560,7 +559,7 @@ class IsotopeModel:
     def calcIsotopeDistribution(self, quanmeth, maxrepeats=0, mininten=0):
         """
         @brief calculates the averagine isotopic abundances
-        @param quanmeth <string>: the quantitation method used to select the correct isofile
+        @param quanmeth <string>: the quantification method used to select the correct isofile
         """
         # using the average of 20 amino acids
         # elem = dict(C=(5.35, 12.0, 12.0107,  0.011122346),
@@ -634,7 +633,7 @@ class IsotopeModel:
         """
         @brief saves the calculated isotope data to file
         @param isof <object>: path object for the isoratio file
-        @param quanmeth <string>: the quantitation method used to select the correct isofile
+        @param quanmeth <string>: the quantification method used to select the correct isofile
         """
         fin = open(str(isof), 'w')
 

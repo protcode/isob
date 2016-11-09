@@ -1,10 +1,10 @@
 """This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -18,12 +18,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here:
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 from peptideset import PeptideSet
 import re
-uniprot_gene_regexp = re.compile(' GN=(\w+) ')
+uniprot_gene_regexp = re.compile(' GN=(\w+)')
 
 
 class PeptideSetManager:
@@ -35,8 +35,11 @@ class PeptideSetManager:
         self.pep2type = {}
         self.FDRdata = {}
         self.proteinFDRdata = {}
+        self.decoyhitidentifiers = set()
+        self.decoysearchfromstart = 0
+        self.decoyreplacementstring = ''
 
-    def addSequenceData(self, sequenceData):
+    def addSequenceData(self, sequenceData, proteins):
         """
         @brief iterates over the sequenceData and generates all possible accessions with all peptides
         @param sequenceData <ndarray>: containing sequence & accession data with hook scores
@@ -46,17 +49,16 @@ class PeptideSetManager:
 
         pep2type = {}
         for pep in sequenceData:
-
-            peptideSets.setdefault(pep['accession'], PeptideSet(pep['accession'], self.logger)).addSequence(pep)
-            if pep['accession'].startswith('DD') or pep['accession'].startswith('###REV###') or \
-                    pep['accession'].startswith('###RND###'):
-                accessiontype = 'REV'
-            else:
-                accessiontype = 'FWD'
             try:
-                pep2type[pep['sequence']].add(accessiontype)
+                gene_name = proteins[pep['accession']][-1]
             except KeyError:
-                pep2type[pep['sequence']] = {accessiontype}
+                gene_name = 'n/d'
+            peptideSets.setdefault(pep['accession'], PeptideSet(pep['accession'], gene_name, self.logger)).addSequence(pep)
+
+            try:
+                pep2type[pep['sequence']].add(pep['hittype'])
+            except KeyError:
+                pep2type[pep['sequence']] = {pep['hittype']}
         self.pep2type = pep2type
 
     def setFDRData(self, peptides):
@@ -185,26 +187,75 @@ class PeptideSetManager:
         self.ordered = ordered
         self.peptide2set = usedSequences
 
+    def convertDecoytoTarget(self, accession, decoyhitidentifiers, decoysearchfromstart, replacestring):
+        newaccession = accession
+        if decoysearchfromstart:
+
+            for to_replace in decoyhitidentifiers:
+                newaccession = replacestring + newaccession[len(to_replace):]
+        else:
+            for to_replace in decoyhitidentifiers:
+                newaccession = newaccession.replace(to_replace, '')
+        return newaccession
+
     def calcProteinFDR(self):
         peptideSets = self.peptideSets
-        # need to add the picked part of the algorithm; if we find two proteins of the same origin (REV / FWD) then pick
-        # the one with the highest score and remove the other from FDR calculation
+        self.logger.log.debug('decoy identifiers %s' % str(self.decoyhitidentifiers))
+        revs = dict()
+        fwds = dict()
         for acc, pepset in peptideSets.iteritems():
-            # get rounded top mascot score for peptides in proteinset
             max_score = round(max([x['pepScore'] for x in pepset.peptideData.values()]))
-            self.logger.log.debug('setname %s has max_score %s FP: %s' % (acc, max_score, pepset.is_reverse_hit))
+            self.logger.log.debug('setname %s has max_score %s FP: %s' % (acc, max_score, pepset.is_decoy))
             pepset.max_score = max_score
-            if not pepset.is_reverse_hit:
-                # if our protein is a FWD (FP) hit
+            if not pepset.is_decoy:
                 try:
-                    self.proteinFDRdata[max_score][0] += 1
+                    if max_score > fwds[acc]:
+                        fwds[acc] = max_score
                 except KeyError:
-                    self.proteinFDRdata[max_score] = [1, 0]
+                    fwds[acc] = max_score
             else:
                 try:
-                    self.proteinFDRdata[max_score][1] += 1
+                    if max_score > revs[acc]:
+                        revs[acc] = max_score
                 except KeyError:
-                    self.proteinFDRdata[max_score] = [0, 1]
+                    revs[acc] = max_score
+        ignrev = set()  # keeps rev protein accessions for which the higher-scoring fwd hit is found
+        ignfwd = set()  # keeps fwd protein accessions for which the higher-scoring rev hit is found
+        if self.cfg.parameters['general']['dopickedproteinfdr']:
+            self.logger.log.info('Picked protein FDR is switched on')
+            for acc in revs:
+                rev2fwdacc = self.convertDecoytoTarget(acc, self.decoyhitidentifiers, self.decoysearchfromstart,
+                                                        self.decoyreplacementstring)
+                self.logger.log.debug('converted decoy accession to target %s' % rev2fwdacc)
+                if rev2fwdacc in fwds:
+                    self.logger.log.debug('shared target & decoy match! %s' % acc)
+                    # a match between fwd & rev
+                    if revs[acc] >= fwds[rev2fwdacc]:
+                        self.logger.log.debug('decoy higher %s, keep it' % acc)
+                        ignfwd.add(rev2fwdacc)
+                    else:
+                        self.logger.log.debug('reverse higher %s, keep it' % rev2fwdacc)
+                        ignrev.add(acc)
+        else:
+            # not running picked FDR so we count each decoy and target hit, even if overlapping (ignore fwd /
+            # ignore rev) are kept empty.
+            self.logger.log.info('Picked protein FDR is not being run')
+            ignfwd = []
+            ignrev = []
+
+        for acc, pepset in peptideSets.iteritems():
+            # get rounded top mascot score for peptides in proteinset
+            if not pepset.is_decoy and acc not in ignfwd:
+                # if our protein is a FWD (TP) hit
+                try:
+                    self.proteinFDRdata[pepset.max_score][0] += 1
+                except KeyError:
+                    self.proteinFDRdata[pepset.max_score] = [1, 0]
+            elif acc in revs and acc not in ignrev:
+                try:
+                    self.proteinFDRdata[pepset.max_score][1] += 1
+                except KeyError:
+                    self.proteinFDRdata[pepset.max_score] = [0, 1]
 
     def calcPeptideSetsQC(self, importData):
         stats = importData.proteinNumbers
@@ -228,11 +279,10 @@ class PeptideSetManager:
                     pep2set.setdefault(pep, set()).add(key[3])
 
             numHookIndex = min(5, pepSet.count_hook)
-            if pepSet.is_reverse_hit:
-                stats['reverse_protein_hits'][numHookIndex] += 1
+            if pepSet.is_decoy:
+                stats['decoy_protein_hits'][numHookIndex] += 1
             else:
-                stats['forward_protein_hits'][numHookIndex] += 1
-
+                stats['target_protein_hits'][numHookIndex] += 1
         # remove the keys from ordered
         self.ordered = filtered[:]
         self.peptide2set = pep2set
@@ -279,22 +329,25 @@ class PeptideSetManager:
                     description = proteindata[0]
                     mw = proteindata[1]
                     if uniprot_gene_regexp.search(description):
-                        gene_name = uniprot_gene_regexp.search(description).group(1)
-                        if acc.startswith('DD') or acc.startswith('###REV###') or acc.startswith('###RND###'):
+                        gene_name = uniprot_gene_regexp.search(description).group(1).upper()
+
+                        if pepSet.is_decoy:
                             gene_name = '###%s###' % gene_name
 
                     else:
-                        gene_name = None
+                        gene_name = acc
+
                 except KeyError:
                     self.logger.log.info('missing data for hit %s' % acc)
                     mw = 0
                     description = None
                     gene_name = None
+
                 proteinSetDBlist.append(dict(protein_group_no=psID, protein_id=acc, mw=mw, description=description,
                                              total_score=pepSet.score_total, ssm=pepSet.ssm,
                                              hssm=pepSet.count_hook, gene_name=gene_name,
                                              upm=len(pepSet.upm),
-                                             hookscore=pepSet.score_hook, is_reverse_hit=pepSet.is_reverse_hit,
+                                             hookscore=pepSet.score_hook, is_decoy=pepSet.is_decoy,
                                              protein_fdr=protein_fdr, max_score=pepSet.max_score))
 
             #  for later we want to find the best scoring protein.
@@ -304,13 +357,65 @@ class PeptideSetManager:
         hdf5results.writeProteinHit(proteinSetDBlist)
         return topScoringProtein
 
+    def groupPerGene(self):
+        """
+        @brief groups all sets of peptides by linked gene name. If more than one set is linked to the same gene, these
+        are merged (allows fewer non-unique peptides and often gathers identical isotopes)
+        """
+        gene_groups = dict()
+        for p in self.peptideSets:
+            pset = self.peptideSets[p]
+            gene_names = pset.gene_names & set(gene_groups)
+            # remove any gene names that are n/d
+            gene_names = gene_names - {'n/d'}
+            if gene_names:
+
+                shared_gn = gene_names.pop()
+                for alt_p in gene_groups[shared_gn]:
+                    alt_pset = self.peptideSets[alt_p]
+                    for alt_gene in alt_pset.gene_names - {shared_gn}:
+                        # there are still other gene names, they will have links in
+                        # gene groups
+                        self.logger.log.debug('alt gene removal step %s %s ' % (alt_gene, shared_gn))
+                gene_groups[shared_gn].append(p)
+            else:
+                for gene_name in pset.gene_names:
+                    gene_groups[gene_name] = [p]
+
+        for g in gene_groups:
+            if len(gene_groups[g]) > 1:
+                self.logger.log.debug('Found multiple entries for gene %s' % g)
+                all_psets = [(self.peptideSets[acc], acc) for acc in gene_groups[g]]
+                all_psets = sorted(all_psets, key=lambda x: len(x[0].validpeptides))
+                best_set, best_acc = all_psets.pop()
+                self.logger.log.debug('found best set for gene %s (accessions %s)'
+                                      % (g, ', '.join(best_set.accessions)))
+                # delete all links to shared protein groups and copy peptides to 'best set'
+                for z, acc in all_psets:
+                    best_set.addAccession(acc)
+                    del self.peptideSets[acc]
+
+                    for seq in z.peptideData:
+                        peptide = z.peptideData[seq]
+                        best_set.peptides.add(seq)
+                        self.peptide2set[seq].remove(acc)
+                        self.peptide2set[seq].add(best_acc)
+                        if not peptide['failed_fdr_filter'] and seq not in best_set.peptideData:
+                            self.logger.log.debug('adding %s to scoring-bearing peptides' % seq)
+                            best_set.score_total += peptide['pepScore']
+                            best_set.ssm += int(peptide['number'])
+                            if peptide['isHook']:
+                                best_set.score_hook += peptide['hookScore']
+                                best_set.count_hook += 1
+                    self.ordered = [x for x in self.ordered if x[-1] != acc]
+                    best_set.peptideData.update(z.peptideData)
+
     def calcUniqueness(self, peptidescoreatthreshold=None):
         if peptidescoreatthreshold is None:
             peptidescoreatthreshold = -1
         peptideSets = self.peptideSets
         peptide2group = {}
         for a in peptideSets:
-
             peptides = peptideSets[a].peptides
             for peptide in peptides:
 
@@ -323,7 +428,6 @@ class PeptideSetManager:
                         peptide2group[peptide] = {a}
         pep2unique = {}
         for p in peptide2group:
-
             pep2unique[p] = 1
             if len(peptide2group[p]) > 1:
                 pep2unique[p] = 0

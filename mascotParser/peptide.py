@@ -1,11 +1,11 @@
 """
 This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -19,24 +19,33 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here :
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
-import re
 
-pepbits = [('misscleave', 'i'), ('mass', 'f'), ('da_delta', 'f'), ('numionsmatched', 'i'), ('sequence', 's'),
+import re
+pepbits = [('misscleave', 'i'),
+           ('mass', 'f'),
+           ('da_delta', 'f'),
+           ('numionsmatched', 'i'),
+           ('sequence', 's'),
            ('peaks1', 'i'),
-           ('modsVariable', 's'), ('score', 'f'), ('seriesfound', 's'), ('peaks2', 'i'), ('peaks3', 'i')]
-rx_accession = re.compile('(C[A-Z]{2}|IPI|D[A-Z]{2})[0-9]{8}.[0-9]+')
+           ('modsVariable', 's'),
+           ('score', 'f'),
+           ('seriesfound', 's'),
+           ('peaks2', 'i'),
+           ('peaks3', 'i')]
+
+re_reverse = re.compile('(###R[A-Z]{2}###)')
 
 
 class Peptide:
     def __init__(self, inputdic, datfile):
-        '''
+        """
         @brief initialises peptide object by parsing the data in inputdic
         @param inputdic <dictionary>: containing the mascot peptide data
         @param datfile <datfile object>: datfile parsed data and methods
-        '''
+        """
 
         # application object data
         self.cfg = datfile.cfg
@@ -72,15 +81,35 @@ class Peptide:
                 # catch other data lines here and report
                 self.logs.datlog.debug('Skipped unexpected data line: %s=%s' % (key, inputdic[key]))
 
+    def doSplitProteinIDs(self, prostring):
+        # essentially splits proteinlist on the ',' string
+        # but because some definitions also contain commas we have to
+        # re-concatenate the separate strings
+        g = prostring.split(',')
+        y = 0
+        newlist = list()
+        while y < len(g):
+            testline = g[y]
+            if not testline:
+                break
+            while testline.count(':') < 4:
+                y += 1
+                testline += ',' + g[y]
+                testline.count(':')
+            newlist.append(testline)
+            y += 1
+        return newlist
+
     def parsePeptideString(self, pepstr):
-        '''
+        """
         @brief parses the main peptide string
         @param pepstr <string>: data string from mascot peptide
-        '''
+        """
         # first split the peptide and protein sections, and split the parts
-        pepprot = pepstr.split(';')
+
+        pepprot = pepstr.split(';"')
         pepdata = pepprot[0].split(',')
-        protdata = pepprot[1].split(',')
+        protdata = self.doSplitProteinIDs('"'+''.join(pepprot[1:]))
 
         # now process the peptide section
         for i, val in enumerate(pepdata):
@@ -97,7 +126,16 @@ class Peptide:
         prots = []
         for pr in protdata:
             prbits = pr.split(':')
-            prots.append(dict(accession=prbits[0][1:-1], start=int(prbits[2]), end=int(prbits[3])))
+            items = prbits[0][1:-1].split('|')
+            if len(items) > 2:
+                accession = items[1]
+            else:
+                accession = items[0]
+            if re_reverse.search(items[0]):
+                rev_tag = re_reverse.search(items[0]).group(1)
+                accession = rev_tag + accession
+
+            prots.append(dict(accession=accession, start=int(prbits[2]),  end=int(prbits[3])))
 
         self.proteins = prots
         self.modsVariable = self.modsVariable.lower()
@@ -105,18 +143,18 @@ class Peptide:
         self.modsFixed, self.modsRelevant = self.calcModStrings()
 
     def isValidSequence(self):
-        '''
+        """
         @brief tests the sequence against valid amino acids
-        '''
+        """
 
         invalaa = [aa for aa in self.sequence if aa not in self.cfg.parameters['general']['allowedamino']]
         return not invalaa
 
     def calcModStrings(self):
-        '''
+        """
         @brief calculates the modstings from the sequences etc
         @param mods <dictionary>: containing the modification data
-        '''
+        """
         mods = self.datfileobj.mods
         modsVariable = self.modsVariable
         seq = self.sequence
@@ -172,11 +210,11 @@ class Peptide:
 
 class ETpeptide(Peptide):
     def __init__(self, inputdic, datfile):
-        '''
+        """
         @brief initialises peptide object by parsing the data in inputdic
         @param inputdic <dictionary>: containing the mascot peptide data
         @param datfile <datfile object>: datfile parsed data and methods
-        '''
+        """
 
         # application object data
         self.cfg = datfile.cfg
@@ -217,10 +255,10 @@ class ETpeptide(Peptide):
             self.logs.datlog.debug('Skipped unexpected data line: %s=%s' % (key, inputdic[key]))
 
     def calcModStrings(self):
-        '''
+        """
         @brief calculates the modstings from the sequences etc
         @param mods <dictionary>: containing the modification data
-        '''
+        """
         mods = self.datfileobj.mods
         modsVariable = self.modsVariable
         seq = self.sequence

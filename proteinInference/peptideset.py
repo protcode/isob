@@ -1,10 +1,10 @@
 """This module is part of the isobarQuant package,
 written by Toby Mathieson and Gavain Sweetman
-(c) 2015 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
+(c) 2016 Cellzome GmbH, a GSK Company, Meyerhofstrasse 1,
 69117, Heidelberg, Germany.
 
 The isobarQuant package processes data from
-.raw files acquired on Thermo Scientific Orbitrap / QExactive
+.raw files acquired on Thermo Scientific Orbitrap / QExactive / Fusion
 instrumentation working in  HCD / HCD or CID / HCD fragmentation modes.
 It creates an .hdf5 file into which are later parsed the results from
 Mascot searches. From these files protein groups are inferred and quantified.
@@ -19,12 +19,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 A copy of the license should have been part of the
 download. Alternatively it can be obtained here:
-https://github.com/protcode/isob/
+https://github.com/protcode/isob
 """
 
 
 class PeptideSet:
-    def __init__(self, accession, logger):
+    def __init__(self, accession, gene_name, logger):
         self.accessions = []
         self.logger = logger
         self.peptides = set()
@@ -35,11 +35,13 @@ class PeptideSet:
         self.score_hook = 0  # Sum of Mascot scores of all best-scoring hook peptides in set passing FDR filter
         self.score_total = 0  # Sum of Mascot scores of all best-scoring peptides in set passing FDR filter
         self.protein_group_no = 0
-        self.is_reverse_hit = False
-        self.reverse_protein_hits = 0
+        self.is_decoy = False
+        self.reverse_protein_hits = set()
+        self.gene_names = {gene_name}
         self.upm = set()
         self.validpeptides = set()  # keeps peptide seqs which are not FDR filtered
         self.addAccession(accession)
+
         self.validfirstuse = 0  # flag: all peptides in set pass FDR criteria AND at least one is first use of sequence
 
     def __str__(self):
@@ -77,6 +79,12 @@ class PeptideSet:
             # new sequence
             self.peptides.add(seq)
             peptideData[seq] = self.pepData2dict(data)
+        if data['hittype'] == 'REV':
+            self.reverse_protein_hits.add(data['accession'])
+        if len(self.reverse_protein_hits) == len(self.accessions):
+            self.is_decoy = True
+        else:
+            self.is_decoy = False
 
     def addAccession(self, accession):
         """
@@ -85,14 +93,7 @@ class PeptideSet:
         @return:
         """
         self.accessions.append(accession)
-        # Mascot adds the hashes when creating the reverse or random sequences for the docoy database
-        if accession.startswith('DD') or accession.startswith('###REV###') or accession.startswith('###RND###'):
-            self.reverse_protein_hits += 1
 
-        if self.reverse_protein_hits == len(self.accessions):
-            self.is_reverse_hit = True
-        else:
-            self.is_reverse_hit = False
 
     @staticmethod
     def pepData2dict(pepData):
