@@ -554,11 +554,19 @@ def parseFusion(data):
             eventDict = dict(resolution=resolution, activation=data['ActivationType'],
                              isolation=float(data['Isolation Window']), energy=float(data['Collision Energy (%)']),
                              lowmz=lowmz, highmz=highmz, colenergysteps=0.0, ms_level=level,
-                             colenergywidth=float(data['Stepped Collision Energy (%)']), detector=data['Detector Type'])
+                             detector=data['Detector Type'])
+            if 'Collision Energy (%)' in data:
+                eventDict['colenergywidth'] = float(data['Collision Energy (%)'])
+            else:
+                eventDict['colenergywidth'] = float(data['Stepped Collision Energy (%)'])
             params[event] = eventDict.copy()
             params[event]['group'] = 'MS%i event' % level
-            params[event]['repeats'] = int(data['Top N'])
 
+            if 'Top N' in data:
+                params[event]['repeats'] = int(data['Top N'])
+            else:
+                params[event]['repeats'] = 1
+                
             eventDict['acttime'] = -1.0
             eventDict['scans'] = [level]
 
