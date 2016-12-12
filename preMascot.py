@@ -117,8 +117,9 @@ def formatArgumentString(filePath, isMGF):
     general = cfg.parameters['general']
     if isMGF:
         # provide commandline for MGF scripts
-        argStr = '--datadir %s --filefilter %s* --msmsfilters.tolppm %s --msmsfilters.tolmda %s' + logStr
-        argStr = argStr % (direc, hdf5, general['tolppm'], general['tolmda'])
+        argStr = '--datadir %s --filefilter %s* --msmsfilters.tolppm %s --msmsfilters.tolmda %s --general.printchargedata %s' \
+                 + logStr
+        argStr = argStr % (direc, hdf5, general['tolppm'], general['tolmda'], general['printchargedata'])
     else:
         # provide command line for pyMSsafe scripts
         argStr = '--datadir %s --filefilter %s* --pid %i --quant %s --general.tolppm %s --general.tolmda %s '

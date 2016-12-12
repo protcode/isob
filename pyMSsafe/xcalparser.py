@@ -535,9 +535,9 @@ def parseFusion(data):
         else:
             highmz = 0.0
             lowmz = 0.0
-
-        resolution = int(data['Orbitrap Resolution'].replace('K', '000'))
-
+        for x in data.keys():
+            if x.find('Resolution') > -1:
+                resolution = int(data[x].replace('K', '000'))
         if msLevel == 'MS level 1':
             order.append('Scan Event 1')
             params['Scan Event 1'] = dict(group='MS event', highmz=highmz, lowmz=lowmz,
@@ -566,7 +566,7 @@ def parseFusion(data):
                 params[event]['repeats'] = int(data['Top N'])
             else:
                 params[event]['repeats'] = 1
-                
+
             eventDict['acttime'] = -1.0
             eventDict['scans'] = [level]
 

@@ -232,7 +232,10 @@ class mgftools:
                         for pt in spectrum:
                             if pt['inten'] == 0:
                                 continue
-                            mgfOut.write('%f  %f  %s\n' % (pt['mz'], pt['inten'], pt['charge']))
+                            if not cfg.parameters['general']['printchargedata']:
+                                mgfOut.write('%f  %f\n' % (pt['mz'], pt['inten']))
+                            else:
+                                 mgfOut.write('%f  %f  %s\n' % (pt['mz'], pt['inten'], pt['charge']))
                             ionList.append(
                                 dict(spec_id=pt['spec_id'], mz=pt['mz'], inten=pt['inten'], charge=pt['charge']))
                     else:
@@ -658,12 +661,12 @@ class mgftools:
 
 if __name__ == '__main__':
     f = 0
+    dataDir = Path('.')
     try:
         configPath = './mgf.cfg'
         cfg = pyMSsafeConfigManager(configPath)
         ret = cfg.evaluateCommandLineArgs(sys.argv)
         cfg.scalePpmMda()
-
         dataDir = cfg.parameters['runtime']['datadir']
         fileFilter = cfg.parameters['runtime']['filefilter']
         hcdOnly = cfg.parameters['general']['hcdonly']
