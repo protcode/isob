@@ -110,7 +110,6 @@ class PeptideSetManager:
             elif peptidesets[acc].ssm == 0:
                 self.logger.log.debug('will delete this peptideSet (%s): no valid FDR-filter-passed peptides' % acc)
                 del peptidesets[acc]
-
         # categorise the protein data by the total number of peptides
         sets_by_length = {}
         for acc in peptidesets:
@@ -228,13 +227,13 @@ class PeptideSetManager:
                                                         self.decoyreplacementstring)
                 self.logger.log.debug('converted decoy accession to target %s' % rev2fwdacc)
                 if rev2fwdacc in fwds:
-                    self.logger.log.debug('shared target & decoy match! %s' % acc)
+                    self.logger.log.debug('shared target & decoy match! %s / %s' % (rev2fwdacc, acc))
                     # a match between fwd & rev
                     if revs[acc] >= fwds[rev2fwdacc]:
-                        self.logger.log.debug('decoy higher %s, keep it' % acc)
+                        self.logger.log.debug('decoy higher / equal %s, keep decoy: %s ' % (rev2fwdacc, acc))
                         ignfwd.add(rev2fwdacc)
                     else:
-                        self.logger.log.debug('reverse higher %s, keep it' % rev2fwdacc)
+                        self.logger.log.debug('fowrard higher %s, keep it' % rev2fwdacc)
                         ignrev.add(acc)
         else:
             # not running picked FDR so we count each decoy and target hit, even if overlapping (ignore fwd /
@@ -320,7 +319,12 @@ class PeptideSetManager:
         for idx, key in enumerate(psKeys):
             psID = protsetIDs[idx]
             pepSet = peptideSets[key]
-            protein_fdr = proteinscore2fdr[pepSet.max_score][3]
+            try:
+                protein_fdr = proteinscore2fdr[pepSet.max_score][3]
+            except KeyError:
+                #  this will most likely happen in very rare cases when the forward and reverse version of
+                #  the same protein is found at score 'pepSet.max_score' and no other proteins have it either.
+                protein_fdr = -1
             self.logger.log.debug('protein_fdr %s for protein %s' % (protein_fdr, psID))
             pepSet.protein_group_no = psID
             for acc in pepSet.accessions:
