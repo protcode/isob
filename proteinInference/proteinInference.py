@@ -371,6 +371,11 @@ class DATimporter:
             is_unique = pep2unique[pep['peptide']]
         except KeyError:
             is_unique = 0
+        try:
+            fdr_at_score = score2fdr[round(pep['score'])][3]
+        except KeyError:
+            print 'no score found in FDR dictionary for peptide %s (rank %s)' % (pep['peptide'], pep['rank'])
+            fdr_at_score = -1            
         pepDict = dict(spectrum_id=spectrum_id, score=pep['score'],
                        rank=pep['rank'], peptide=pep['peptide'],
                        is_unique=is_unique, failed_fdr_filter=pep['failed_fdr_filter'],
@@ -379,7 +384,7 @@ class DATimporter:
                        is_decoy=0, missed_cleavage_sites=pep['missed_cleavage_sites'],
                        delta_seq=query['delta_seq'], ppm_error=pep['da_delta'] / pep['mw'] * 1e6,
                        delta_mod=query['delta_mod'], in_protein_inference=0,
-                       fdr_at_score=score2fdr[round(pep['score'])][3])
+                       fdr_at_score=fdr_at_score)
         mods = hdf.modsHandler.generateModifications(pep)
         quantFound = 0
         # here we check that the modification relating to the quantification label is in the
