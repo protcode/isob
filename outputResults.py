@@ -104,7 +104,11 @@ def makemodificationsstring(positional_modstring, peptide):
 def preparePeptideData(pep, proteins, fdr_data, specs, quant):
     protein = proteins[pep['protein_group_no']]
     specID = pep['spectrum_id']
-    fdr_at_score = fdr_data[round(pep['score'])]
+    try:
+        fdr_at_score = fdr_data[round(pep['score'])]
+    except KeyError:
+        print 'no key found in fdr data for %s / %s ' % (pep['peptide'],  pep['score'])
+        fdr_at_score = -1
     try:
         in_top3 = pep['in_top3']
     except KeyError:
