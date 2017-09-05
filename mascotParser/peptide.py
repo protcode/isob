@@ -37,7 +37,7 @@ pepbits = [('misscleave', 'i'),
            ('peaks3', 'i')]
 
 re_reverse = re.compile('(###R[A-Z]{2}###)')
-
+re_prbits = re.compile('^(.+):\d+:(\d+):(\d+):\d+$')
 
 class Peptide:
     def __init__(self, inputdic, datfile):
@@ -125,8 +125,16 @@ class Peptide:
 
         prots = []
         for pr in protdata:
-            prbits = pr.split(':')
-            items = prbits[0][1:-1].split('|')
+            if re_prbits.match(pr):
+                start = re_prbits.match(pr).group(2)
+                stop = re_prbits.match(pr).group(3)
+                full_accession = re_prbits.match(pr).group(1).replace('"','')
+                items = full_accession.split('|')
+            else:
+                prbits = pr.split(':')
+                items = prbits[0][1:-1].split('|')
+                start = prbits[2]
+                stop = prbits[3]
             if len(items) > 2:
                 accession = items[1]
             else:
@@ -135,7 +143,7 @@ class Peptide:
                 rev_tag = re_reverse.search(items[0]).group(1)
                 accession = rev_tag + accession
 
-            prots.append(dict(accession=accession, start=int(prbits[2]),  end=int(prbits[3])))
+            prots.append(dict(accession=accession, start=int(start),  end=int(stop)))
 
         self.proteins = prots
         self.modsVariable = self.modsVariable.lower()
