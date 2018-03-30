@@ -440,7 +440,9 @@ def collectProteinData(hdfObject):
         proteindata2out['protein_group_no'] = protein_group_no
         outString = '%(protein_group_no)i\t%(protein_id)s\t%(description)s\t%(gene_name)s\t%(mw)s\t%(top3)s\t'
         outString += '%(protein_fdr)s\t%(max_score).0f\t%(total_score).0f\t%(ssm)s\t'
-        outString += '%(upm)s\t%(fqssm)s\t%(qssm)s\t%(qupm)s\t%(referenceid)s'
+        outString += '%(upm)s\t%(fqssm)s\t%(qssm)s\t%(qupm)s'
+        if usedIsotopes:
+            outString += '\t%(referenceid)s'
         outString = outString % proteindata2out
         for idx in quantfieldnames:
             for iso in usedIsotopes:
