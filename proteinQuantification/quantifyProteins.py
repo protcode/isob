@@ -58,56 +58,30 @@ class QuantifyProtController:
         We basically create a intersection of spectra ids which pass the thresholds and return this
         @return set validspectrumids
         """
-        p2tfilter = 'p2t > %s' % quantParameters['p2tthreshold']
-        s2ifilter = 's2i > %s' % quantParameters['s2ithreshold']
-        mascotfilter = 'score > %s' % quantParameters['mascotthreshold']
-        fdrfilter = 'fdr_at_score < %s' % quantParameters['fdrthreshold']
-        uniquefilter = 'is_unique==1'
-        prior_ion_filter = 'prior_ion_ratio <= %s' % quantParameters['prior_ion_filter']
-        least_squares_filter = 'least_squares <= %s' % quantParameters['least_squares_filter']
-        peplengthfilter = 'peptide_length >= %s' % quantParameters['peplengthfilter']
-        deltaseqfilter = '(delta_seq > %s) | (delta_seq == 0)' % quantParameters['deltaseqfilter']
         ms1source_template = "(ms1source != '%s') & "
         ms1source_filter = ''
         if quantParameters['ms1source_filter']:
-            ms1source_filter += ms1source_template * len(quantParameters['ms1source_filter'])
-            ms1source_filter = ms1source_filter[:-3]
+             ms1source_filter += ms1source_template * len(quantParameters['ms1source_filter'])
+             ms1source_filter = ms1source_filter[:-3]
+             ms1source_filter = ms1source_filter % tuple(quantParameters['ms1source_filter'])
 
-            ms1source_filter = ms1source_filter % tuple(quantParameters['ms1source_filter'])
+        whereClause = '(p2t > %f) & (s2i > %f) & (peptide_length >= %i) & ((delta_seq > %f) | (delta_seq == 0)) & ' \
+                      '(is_unique==1) & (fdr_at_score < %f) & (score > %f) & (prior_ion_ratio <= %f ) & ' \
+                      '(least_squares <= %f)' % \
+                      (quantParameters['p2tthreshold'],
+                       quantParameters['s2ithreshold'],
+                       quantParameters['peplengthfilter'],
+                       quantParameters['deltaseqfilter'],
+                       quantParameters['fdrthreshold'],
+                       quantParameters['mascotthreshold'],
+                       quantParameters['prior_ion_filter'],
+                       quantParameters['least_squares_filter'])
 
-
-        validspectrumids = self.hdf5quantprot.getFilterSpectra(p2tfilter)
-        self.cfg.log.debug('there are %s ids after p2tfilter' % len(validspectrumids))
-
-        validspectrumids = validspectrumids & self.hdf5quantprot.getFilterSpectra(s2ifilter)
-
-        self.cfg.log.debug('there are %s ids after p2tfilter & s2ifilter ' % len(validspectrumids))
-        validspectrumids = validspectrumids & self.hdf5quantprot.getFilterSpectra(mascotfilter)
-
-        self.cfg.log.debug('there are %s ids after p2tfilter & s2ifilter & mascotfilter ' % len(validspectrumids))
-        validspectrumids = validspectrumids & self.hdf5quantprot.getFilterSpectra(peplengthfilter)
-
-        validspectrumids = validspectrumids & self.hdf5quantprot.getFilterSpectra(uniquefilter)
-        self.cfg.log.debug('there are %s ids after p2tfilter & s2ifilter & mascotfilter & peplengthfilter' %
-                           len(validspectrumids))
-
-        validspectrumids = validspectrumids & self.hdf5quantprot.getFilterSpectra(deltaseqfilter)
-        self.cfg.log.debug('there are %s ids after p2tfilter & s2ifilter & mascotfilter & deltaseqfilter '
-                           '& peplengthfilter ' % len(validspectrumids))
-
-        validspectrumids = validspectrumids & self.hdf5quantprot.getFilterSpectra(fdrfilter)
-        self.cfg.log.debug('there are %s ids after p2tfilter & s2ifilter & mascotfilter & deltaseqfilter & fdrfilter '
-                           '& peplengthfilter ' % len(validspectrumids))
-
-        validspectrumids = validspectrumids & self.hdf5quantprot.getFilterSpectra(prior_ion_filter)
-
-        validspectrumids = validspectrumids & self.hdf5quantprot.getFilterSpectra(least_squares_filter)
-
-        self.cfg.log.debug('there are %s ids after p2tfilter & s2ifilter & mascotfilter & deltaseqfilter & fdrfilter '
-                           '& peplengthfilter & both ms1 filters ' % len(validspectrumids))
         if ms1source_filter:
-            validspectrumids = validspectrumids & self.hdf5quantprot.getFilterSpectra(ms1source_filter)
+            whereClause += '&  '
+            whereClause += ms1source_filter
 
+        validspectrumids = self.hdf5quantprot.getFilterSpectra(whereClause)
         return validspectrumids
 
     def getValidProteinGroups(self):

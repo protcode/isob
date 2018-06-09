@@ -31,7 +31,7 @@ from pathlib import Path
 
 
 # CommonUtils libraries
-sys.path.insert(0, '..')
+#$sys.path.insert(0, '..')
 from CommonUtils.ConfigManager import ConfigManager
 from CommonUtils.LoggingManager import Logger
 from CommonUtils.tools import MasterQueue

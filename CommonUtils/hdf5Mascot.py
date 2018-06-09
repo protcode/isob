@@ -267,11 +267,14 @@ class HDF5Mascot:
         return
 
     def getH5DFQuantMeth(self):
-        isotopes = self.hdf.readTable('/rawdata/isotopes')
-        if len(isotopes) == 0:
-            return 0
-        else:
-            return isotopes[0]['method_id']
+        try:
+            isotopes = self.hdf.readTable('/rawdata/isotopes')
+            if len(isotopes) == 0:
+                return 0
+            else:
+                return isotopes[0]['method_id']
+        except:
+            return  0
 
     def writeMasses(self, massesDict):
         """

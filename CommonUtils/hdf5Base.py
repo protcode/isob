@@ -473,6 +473,24 @@ class hdf5Base:
         else:
             raise ExHa.HDF5consistancyError('Table %s does not exist' % tablePath)
 
+    def getDataInKernelSearch(self, tablePath, whereClause, column):
+        """
+        @brief performs an in-kernel search of tablePath for data matching the whereClause, returns
+        non redundant set of single value data given by column. It is beneficial since the search is
+        in-kernel and not all the data is read into memory
+        @return set: set of contents of column
+        @param tablePath <string>: internal path of the table to be read.
+        @param whereClause <string>: filter conditions for the table.
+        @param column <string>: single column value from table selected by whereClause.
+        @return data <array>: containing the table contents
+        """
+
+        if tablePath in self.tableTOC:
+            table = self.tableTOC[tablePath]
+            return set([x[column] for x in table.where(whereClause)])
+        else:
+            raise ExHa.HDF5consistancyError('Table %s does not exist' % tablePath)
+
     def getDataGeneral(self, tablePath, whereClause):
         """
         @brief searches tablePath for data matching the whereClause, returns all matching rows

@@ -224,7 +224,7 @@ class Processor:
         if kernel < order + 2:
             raise ValueError("kernel is to small for the polynomals\nshould be > order + 2")
 
-        # a second order polynomal has 3 coefficients
+        # a second order polynomial has 3 coefficients
         order_range = range(order + 1)
         half_window = (kernel - 1) // 2
         b = numpy.mat([[k ** i for i in order_range] for k in range(-half_window, half_window + 1)])

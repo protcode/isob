@@ -239,12 +239,21 @@ class HDF5Results:
 
         return self.hdf.appendRows('/proteinquant', proteinQuantlist)
 
-    def getFilterSpectra(self, whereclause):
+    def getFilterSpectra_trad(self, whereclause):
+        """Currently superceded by getFilterSpectra which use in-kernal searches for better
+        memory management"""
         hdf = self.hdf
         tablePath = '/specquant'
         spectrumdata = hdf.getDataGeneral(tablePath, whereclause)
         self.cfg.log.debug('got %s records after %s' % (len(spectrumdata), whereclause))
         return set(spectrumdata['spectrum_id'])
+
+    def getFilterSpectra(self, whereClause):
+        hdf = self.hdf
+        tablePath = '/specquant'
+        spec_ids = hdf.getDataInKernelSearch(tablePath, whereClause, 'spectrum_id')
+        return spec_ids
+
 
     def getPeakRT_CS_lessthan30sfrompeak(self):
         hdf = self.hdf

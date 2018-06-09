@@ -582,7 +582,7 @@ processDatfileData<-function(myfile){
     m1<-ggplot(peptides, aes(y=score, x = name)) + geom_violin() + geom_boxplot(width=.5) +
       geom_text(size=4,data = score_meds, aes(x = name, y = -15, label = paste0('n=', n), size = 18)) +
       geom_text(size=4,data = score_meds, aes(x = name, y = -5, label = paste0('median=', round(med,1)), size = 10)) +
-      theme(legend.position='none', legend.position = 'bottom') + theme(title=element_text(size=18,face='bold'), axis.text=element_text(size=18, face='plain'), legend.title = element_text(size=18, face='plain') ) +
+      theme(legend.position = 'bottom') + theme(title=element_text(size=18,face='bold'), axis.text=element_text(size=18, face='plain'), legend.title = element_text(size=18, face='plain') ) +
     ggtitle('Distribution of SSM Scores') + xlab('') + ylab('Mascot Ion Score') +
     coord_cartesian(ylim = c(-20,120))
     score_bytype_meds <- ddply(peptides, .(name, hittype), summarise, n = length(score), med = median(score), avg = mean(score) )
