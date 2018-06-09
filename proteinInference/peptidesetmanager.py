@@ -364,7 +364,7 @@ class PeptideSetManager:
     def groupPerGene(self):
         """
         @brief groups all sets of peptides by linked gene name. If more than one set is linked to the same gene, these
-        are merged (allows fewer non-unique peptides and often gathers identical isotopes)
+        are merged (allows fewer non-unique peptides and often gathers identical isoforms)
         """
         gene_groups = dict()
         for p in self.peptideSets:

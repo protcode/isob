@@ -65,7 +65,7 @@ class QuantifyProtController:
              ms1source_filter = ms1source_filter[:-3]
              ms1source_filter = ms1source_filter % tuple(quantParameters['ms1source_filter'])
 
-        whereClause = '(p2t > %f) & (s2i > %f) & (peptide_length > %i) & ((delta_seq > %f) | (delta_seq == 0)) & ' \
+        whereClause = '(p2t > %f) & (s2i > %f) & (peptide_length >= %i) & ((delta_seq > %f) | (delta_seq == 0)) & ' \
                       '(is_unique==1) & (fdr_at_score < %f) & (score > %f) & (prior_ion_ratio <= %f ) & ' \
                       '(least_squares <= %f)' % \
                       (quantParameters['p2tthreshold'],
