@@ -370,7 +370,7 @@ class DatParser:
                     if match:
                         value = match.group('value')
                         key = match.group('key')
-                        if value == '-1':
+                        if value.startswith('-1'):
                             # no matching peptide
                             datfile.stats['numspectra_nopeps'] += 1
                         else:
