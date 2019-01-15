@@ -342,7 +342,9 @@ class mgftools:
         # set back to mass ordered array
         ions.sort(order='mz')
         maxmass = (header['monomz'] - self.proton) * header['charge'] - 50
-
+        if maxmass < ions['mz'].min():
+            print('all ions above max mass! %s' % header['spec_id'])
+            return ions
         last = len(ions) - 1
         while ions[last]['mz'] > maxmass:
             last -= 1
