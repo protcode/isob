@@ -190,8 +190,9 @@ if __name__ == "__main__":
         for isotopelabel_id, data in allsumionratiodata.iteritems():
             allfractionbgratios[isotopelabel_id] = np.median(data)
         # second normalization so that the bg-ratios all add to 1
+        starting_allfractionbgratios = allfractionbgratios.copy()
         for isotopelabel_id, data in allfractionbgratios.iteritems():
-            allfractionbgratios[isotopelabel_id] = data / sum(allfractionbgratios.values())
+            allfractionbgratios[isotopelabel_id] = data / sum(starting_allfractionbgratios.values())
         logger.log.debug(('allfractionbgratios are %s' % str(allfractionbgratios)))
         for corrects2iquantob in corrects2iquantoblist:
             # perform correction for each of the analyzed .hdf5 files.
