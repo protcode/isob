@@ -40,7 +40,7 @@ from unimodxmlparser import UnimodXMLParser
 
 rx_pepmaindata = re.compile('q[0-9]+_p[0-9]+$')
 re_reverse = re.compile('(###R[A-Z]{2}###)')
-uniprot_gene_name = re.compile('GN=(\w+)')
+uniprot_gene_name = re.compile('GN=(\S+)')
 
 
 class Datfile:
@@ -714,7 +714,7 @@ class Datfile:
             # the xxxx part and also append the reverse tag to it
             items = acc.split('|')
             if uniprot_gene_name.search(name[1:-1]):
-                gene_name = uniprot_gene_name.search(name[1:-1]).group(1).upper()
+                gene_name = uniprot_gene_name.search(name[1:-1]).group(1)
             else:
                 gene_name = acc
 

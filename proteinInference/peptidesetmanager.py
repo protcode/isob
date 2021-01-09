@@ -23,7 +23,7 @@ https://github.com/protcode/isob
 
 from peptideset import PeptideSet
 import re
-uniprot_gene_regexp = re.compile(' GN=(\w+)')
+uniprot_gene_regexp = re.compile(' GN=(\S+)')
 
 
 class PeptideSetManager:
@@ -333,7 +333,7 @@ class PeptideSetManager:
                     description = proteindata[0]
                     mw = proteindata[1]
                     if uniprot_gene_regexp.search(description):
-                        gene_name = uniprot_gene_regexp.search(description).group(1).upper()
+                        gene_name = uniprot_gene_regexp.search(description).group(1)
 
                         if pepSet.is_decoy:
                             gene_name = '###%s###' % gene_name
@@ -364,7 +364,7 @@ class PeptideSetManager:
     def groupPerGene(self):
         """
         @brief groups all sets of peptides by linked gene name. If more than one set is linked to the same gene, these
-        are merged (allows fewer non-unique peptides and often gathers identical isoforms)
+        are merged (allows fewer non-unique peptides and often gathers differently named isoforms)
         """
         gene_groups = dict()
         for p in self.peptideSets:
